@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chatbot System</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="chat-card" aria-label="Chatbot">
+      <header class="chat-header">
+        <div>
+          <p class="eyebrow">AI Assistant</p>
+          <h1>Chatbot System</h1>
+        </div>
+        <span class="status">Online</span>
+      </header>
+
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="message bot-message">
+          <span class="message-label">Bot</span>
+          <p>Hi! I am ready to help. What would you like to do?</p>
+        </div>
+      </div>
+
+      <form id="chat-form" class="input-row">
+        <label class="sr-only" for="message">Message</label>
+        <input id="message" name="message" placeholder="Type your message..." autocomplete="off" required>
+        <button type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

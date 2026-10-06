@@ -1,0 +1,13 @@
+{
+  "name": "chatbot-system",
+  "version": "1.0.0",
+  "description": "A dependency-free, rule-based chatbot system",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
