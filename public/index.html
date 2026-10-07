@@ -1,37 +1,17 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Chatbot System</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Portside · Kenya import assistant</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
-  <main class="app-shell">
-    <section class="chat-card" aria-label="Chatbot">
-      <header class="chat-header">
-        <div>
-          <p class="eyebrow">AI Assistant</p>
-          <h1>Chatbot System</h1>
-        </div>
-        <span class="status">Online</span>
-      </header>
-
-      <div id="messages" class="messages" aria-live="polite">
-        <div class="message bot-message">
-          <span class="message-label">Bot</span>
-          <p>Hi! I am ready to help. What would you like to do?</p>
-        </div>
-      </div>
-
-      <form id="chat-form" class="input-row">
-        <label class="sr-only" for="message">Message</label>
-        <input id="message" name="message" placeholder="Type your message..." autocomplete="off" required>
-        <button type="submit">Send</button>
-      </form>
-    </section>
-  </main>
-
-  <script src="/app.js"></script>
-</body>
-</html>
+<header class="topbar"><a class="brand" href="/">P<span>PORTSIDE <small>KENYA IMPORT ASSISTANT</small></span></a><nav id="app-nav" aria-label="Main navigation" hidden><button class="nav active" data-view="importer">Import assistant</button><button class="nav" id="admin-nav" data-view="admin" hidden>Admin dashboard</button></nav><div id="account-menu" hidden><span id="account-name"></span> <button id="logout" class="text-button">Sign out</button></div></header>
+<main>
+<section id="login-view" class="login-shell"><div class="login-card"><p class="eyebrow">WELCOME TO PORTSIDE</p><h1>Your journey starts here.</h1><p class="muted">Sign in to access the import assistant or manage bot knowledge.</p><form id="login-form"><label for="username">Username</label><input id="username" name="username" autocomplete="username" maxlength="100" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required><p id="login-error" role="alert" hidden></p><button class="primary" type="submit">Sign in →</button></form><p class="muted">Prototype accounts are provided in the project README.</p></div></section>
+<section id="importer-view" hidden>
+<div class="intro"><p class="eyebrow">FROM AUCTION TO ARRIVAL</p><h1>Your next import.<br><span>A little more certain.</span></h1><p>Explore landed costs, check a vehicle, and follow its journey to Kenya.<br>Start a conversation. We’ll take it from there.</p></div>
+<div class="workspace">
+<aside class="services"><p class="eyebrow">HOW CAN WE HELP?</p><button data-action="quote"><span class="service-icon">↗</span><span><strong>Landed-cost quote</strong><small>See an itemized cost breakdown</small></span><span>→</span></button><button data-action="advisor"><span class="service-icon">◷</span><span><strong>Best time to import</strong><small>Compare now, +1 and +2 months</small></span><span>→</span></button><button data-action="vin"><span class="service-icon">⌕</span><span><strong>Vehicle history</strong><small>Check a sample VIN record</small></span><span>→</span></button><button data-action="tracking"><span class="service-icon">▱</span><span><strong>Track a shipment</strong><small>Look up a BL or container number</small></span><span>→</span></button><div class="note"><strong>A preview, with transparency.</strong><p>All costs, vehicle records, and shipment updates are illustrative. This demo is not connected to KRA or live shipping services.</p></div></aside>
+<section class="chat-card" aria-label="Import assistant chat"><header class="chat-header"><div class="avatar">P</div><div><strong>Portside assistant</strong><small><i></i> Demo assistant · Kenya</small></div><button id="clear-chat" class="text-button">New chat</button></header><div id="messages" class="messages" aria-live="polite"></div><div class="quick-actions"><button data-action="quote">Get a quote</button><button data-action="tracking">Track shipment</button><button data-action="advisor">Timing advice</button></div><form id="chat-form" class="input-row"><label class="sr-only" for="message">Your message</label><input id="message" placeholder="Ask about your car import…" autocomplete="off" maxlength="1000" required><button class="primary" type="submit" aria-label="Send message">Send ↗</button></form><div class="chat-footer">WhatsApp-style simulator · Sign-in required · Illustrative demo data</div></section>
+</div></section>
+<section id="admin-view" hidden><div class="admin-heading"><div><p class="eyebrow">THE BIG PICTURE</p><h1>Importer insights</h1><p>Turn unanswered questions into better conversations.</p></div><span class="demo-pill">ADMIN ACCESS</span></div><div id="metrics" class="metrics"></div><div class="admin-grid"><section class="panel"><div class="panel-heading"><h2>Query activity</h2><span>Since server start</span></div><div id="activity-chart" class="activity-chart"></div></section><section class="panel"><h2>Most requested models</h2><div id="model-chart"></div></section><section class="panel queue-panel"><div class="panel-heading"><h2>Unanswered questions</h2><span id="queue-count"></span></div><p class="muted">Save an answer to make it available the next time someone asks the same question.</p><div id="unresolved-queue"></div></section><section class="panel"><h2>Knowledge base</h2><p class="muted">Answers saved by the admin for all signed-in users.</p><div id="knowledge-list"></div></section></div></section>
+<footer class="page-footer"><span>PORTSIDE / Built for the journey ahead.</span><span>Kenya car import prototype</span></footer>
+</main><script src="/app.js"></script>
+</body></html>
