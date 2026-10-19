@@ -4,10 +4,10 @@ const messages = $('#messages');
 let currentUser = null;
 let state = { queries: [], unresolved: [], knowledge: [], models: {} };
 let pendingActivity = Promise.resolve();
-async function api(path, data) {
-  const response = await fetch(path, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+async function api(path, data, method = 'POST') {
+  const response = await fetch(path, data === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json();
-  if (!response.ok) { if (response.status === 401 && path !== '/api/login') showLogin(); throw new Error(result.error || 'Request failed.'); }
+  if (!response.ok) { if (response.status === 401 && path !== '/api/auth/login') showLogin(); throw new Error(typeof result.error === 'string' ? result.error : result.error?.message || 'Request failed.'); }
   return result;
 }
 function showLogin() {
@@ -18,31 +18,116 @@ function showLogin() {
   messages.replaceChildren();
   state = { queries: [], unresolved: [], knowledge: [], models: {} };
   $('#unresolved-queue').replaceChildren(); $('#knowledge-list').replaceChildren();
+  $('#customer-vehicles').replaceChildren(); $('#customer-enquiries').replaceChildren();
 }
 function showApp(user) {
   currentUser = user; $('#login-view').hidden = true; $('#app-nav').hidden = false; $('#account-menu').hidden = false;
-  $('#account-name').textContent = `${user.username} · ${user.role}`;
+  $('#account-name').textContent = `${user.email} · ${user.role}`;
   $('#admin-nav').hidden = user.role !== 'admin';
+  $('.records-card').hidden = user.role !== 'customer';
   $('#importer-view').hidden = false; $('#admin-view').hidden = true;
   for (const nav of document.querySelectorAll('[data-view]')) nav.classList.toggle('active', nav.dataset.view === 'importer');
   messages.replaceChildren(); greet();
+  if (user.role === 'customer') loadCustomerRecords();
 }
 function activity(data) {
   pendingActivity = pendingActivity.then(() => api('/api/activity', data)).catch((error) => { if (currentUser) bubble(`Could not save activity: ${error.message}`); });
 }
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const button = event.target.querySelector('button'); button.disabled = true; $('#login-error').hidden = true;
-  try { const result = await api('/api/login', Object.fromEntries(new FormData(event.target))); event.target.reset(); showApp(result.user); }
+  try { const result = await api('/api/auth/login', Object.fromEntries(new FormData(event.target))); event.target.reset(); showApp(result.user); }
   catch (error) { $('#login-error').textContent = error.message; $('#login-error').hidden = false; }
   finally { button.disabled = false; }
 });
+$('#show-register').addEventListener('click', () => {
+  $('#login-form').hidden = true; $('#show-register').parentElement.hidden = true;
+  $('#register-form').hidden = false; $('#register-name').focus();
+});
+$('#show-login').addEventListener('click', () => {
+  $('#register-form').hidden = true; $('#login-form').hidden = false; $('#show-register').parentElement.hidden = false;
+  $('#email').focus();
+});
+$('#register-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const button = event.target.querySelector('button[type="submit"]'); button.disabled = true; $('#register-error').hidden = true;
+  try { const result = await api('/api/auth/register', Object.fromEntries(new FormData(event.target))); event.target.reset(); showApp(result.user); }
+  catch (error) { $('#register-error').textContent = error.message; $('#register-error').hidden = false; }
+  finally { button.disabled = false; }
+});
 $('#logout').addEventListener('click', async () => {
-  try { await pendingActivity; await api('/api/logout', {}); showLogin(); }
+  try { await pendingActivity; await api('/api/auth/logout', {}); showLogin(); }
   catch (error) { bubble(`Could not sign out: ${error.message}`); }
 });
 const money = (value) => `Ksh ${Number(value).toLocaleString('en-KE')}`;
 const normalize = (value) => value.toLowerCase().replace(/[?!.,]/g, '').replace(/\s+/g, ' ').trim();
 function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
+async function loadCustomerRecords() {
+  const status = $('#records-status'); status.textContent = 'Loading your saved records…';
+  try {
+    const [vehicleData, enquiryData] = await Promise.all([api('/api/vehicles'), api('/api/enquiries')]);
+    if (currentUser?.role !== 'customer') return;
+    const vehicleList = $('#customer-vehicles'); vehicleList.replaceChildren();
+    const vehicleSelect = $('#enquiry-form').elements.vehicleId;
+    vehicleSelect.replaceChildren(new Option('No vehicle selected', ''));
+    if (!vehicleData.vehicles.length) vehicleList.append(element('p', 'empty', 'No vehicles saved yet.'));
+    for (const vehicle of vehicleData.vehicles) {
+      const item = element('div', 'record-item');
+      item.append(element('strong', '', `${vehicle.year ? `${vehicle.year} ` : ''}${vehicle.make} ${vehicle.model}`));
+      const details = [vehicle.engineCapacityCc ? `${vehicle.engineCapacityCc} cc` : '', vehicle.fuelType || '', vehicle.originCountry || '', vehicle.vin || ''].filter(Boolean).join(' · ');
+      if (details) item.append(element('div', '', details));
+      vehicleList.append(item); vehicleSelect.add(new Option(`${vehicle.year ? `${vehicle.year} ` : ''}${vehicle.make} ${vehicle.model}`, vehicle.id));
+    }
+    const enquiryList = $('#customer-enquiries'); enquiryList.replaceChildren();
+    if (!enquiryData.enquiries.length) enquiryList.append(element('p', 'empty', 'No enquiries yet.'));
+    for (const enquiry of enquiryData.enquiries) {
+      const item = element('div', 'record-item');
+      item.append(element('strong', '', `${enquiry.reference} · ${enquiry.category}`), element('div', '', `${enquiry.status.replaceAll('_', ' ')} · ${new Date(enquiry.created_at).toLocaleDateString('en-KE')}`), element('p', '', enquiry.description));
+      enquiryList.append(item);
+    }
+    status.textContent = '';
+  } catch (error) { status.textContent = error.message; }
+}
+$('#vehicle-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const form = event.currentTarget; const button = form.querySelector('button'); const status = $('#records-status'); button.disabled = true;
+  const data = Object.fromEntries(new FormData(form));
+  for (const key of ['year', 'engineCapacityCc']) data[key] = data[key] ? Number(data[key]) : undefined;
+  for (const key of Object.keys(data)) if (data[key] === undefined || data[key] === '') delete data[key];
+  try { await api('/api/vehicles', data); form.reset(); await loadCustomerRecords(); status.textContent = 'Vehicle saved.'; }
+  catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+$('#enquiry-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const form = event.currentTarget; const button = form.querySelector('button'); const status = $('#records-status'); button.disabled = true;
+  const data = Object.fromEntries(new FormData(form)); if (!data.vehicleId) delete data.vehicleId;
+  try { const result = await api('/api/enquiries', data); form.reset(); await loadCustomerRecords(); status.textContent = `Enquiry submitted: ${result.enquiry.reference}`; }
+  catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+async function renderAdminEnquiries() {
+  const status = $('#admin-enquiry-status'); status.textContent = 'Loading enquiries…';
+  try {
+    const data = await api('/api/admin/enquiries'); if (currentUser?.role !== 'admin') return;
+    const list = $('#admin-enquiries-list'); list.replaceChildren();
+    if (!data.enquiries.length) list.append(element('p', 'empty', 'No customer enquiries yet.'));
+    for (const enquiry of data.enquiries) {
+      const row = element('div', 'admin-enquiry'); const summary = element('div');
+      summary.append(element('strong', '', `${enquiry.reference} · ${enquiry.category}`), element('small', '', `${enquiry.customerName} (${enquiry.customerEmail})`), element('p', '', enquiry.description));
+      const statusSelect = document.createElement('select'); statusSelect.setAttribute('aria-label', `Status for ${enquiry.reference}`);
+      for (const value of ['new', 'in_review', 'waiting_on_customer', 'resolved', 'closed']) statusSelect.add(new Option(value.replaceAll('_', ' '), value, false, value === enquiry.status));
+      const prioritySelect = document.createElement('select'); prioritySelect.setAttribute('aria-label', `Priority for ${enquiry.reference}`);
+      for (const value of ['low', 'normal', 'high', 'urgent']) prioritySelect.add(new Option(value, value, false, value === enquiry.priority));
+      const save = element('button', 'primary', 'Save'); save.type = 'button';
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try { await api(`/api/admin/enquiries/${enquiry.id}`, { status: statusSelect.value, priority: prioritySelect.value }, 'PATCH'); status.textContent = 'Enquiry updated.'; }
+        catch (error) { status.textContent = error.message; }
+        finally { save.disabled = false; }
+      });
+      row.append(summary, statusSelect, prioritySelect, save); list.append(row);
+    }
+    status.textContent = `${data.enquiries.length} customer ${data.enquiries.length === 1 ? 'enquiry' : 'enquiries'}`;
+  } catch (error) { status.textContent = error.message; }
+}
+$('#refresh-enquiries').addEventListener('click', renderAdminEnquiries);
 function bubble(text, sender = 'bot') {
   const node = element('div', `message ${sender}-message`);
   if (text) node.append(element('p', '', text));
@@ -118,6 +203,7 @@ $('#clear-chat').addEventListener('click', () => { messages.replaceChildren(); g
 for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => { const admin = button.dataset.view === 'admin'; if (!currentUser || (admin && currentUser.role !== 'admin')) return; $('#importer-view').hidden = admin; $('#admin-view').hidden = !admin; for (const nav of document.querySelectorAll('[data-view]')) nav.classList.toggle('active', nav === button); if (admin) renderAdmin(); });
 async function renderAdmin() {
   if (currentUser?.role !== 'admin') return;
+  await renderAdminEnquiries();
   try { await pendingActivity; const result = await api('/api/admin'); if (currentUser?.role !== 'admin') return; state = result; } catch (error) { $('#unresolved-queue').replaceChildren(element('p', 'empty', error.message)); return; }
   const metrics = $('#metrics'); metrics.replaceChildren();
   const items = [['Total queries', state.queries.length, 'Chat messages and service requests'], ['Quote requests', state.queries.filter((q) => q.intent === 'quote').length, 'Requests for a cost breakdown'], ['Unresolved queue', state.unresolved.length, 'Questions awaiting an answer'], ['Drop-off rate', '—', 'Requires backend session completion tracking']];
@@ -134,4 +220,4 @@ async function renderAdmin() {
   const knowledge = $('#knowledge-list'); knowledge.replaceChildren(); if (!state.knowledge.length) knowledge.append(element('p', 'empty', 'No saved answers yet. Answer a question in the queue to get started.'));
   for (const item of state.knowledge) { const row = element('div', 'knowledge-item'); row.append(element('strong', '', item.question), element('p', 'muted', item.answer)); knowledge.append(row); }
 }
-api('/api/session').then(({ user }) => showApp(user)).catch(() => showLogin());
+api('/api/auth/me').then(({ user }) => showApp(user)).catch(() => showLogin());
