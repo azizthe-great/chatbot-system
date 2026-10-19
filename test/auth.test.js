@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+process.env.PORTSIDE_DATA_FILE = ':memory:';
 const { server } = require('../server');
 
 test('login, role enforcement, shared knowledge and logout', async () => {

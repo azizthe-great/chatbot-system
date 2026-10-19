@@ -1,13 +1,18 @@
 {
   "name": "chatbot-system",
   "version": "1.0.0",
-  "description": "A dependency-free, rule-based chatbot system",
+  "description": "Portside Kenya import assistant with saved conversations, estimates and admin knowledge tools",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "check": "node --check server.js && node --check auth.js && node --check google-auth.js && node --check services.js && node --check store.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
   }
 }

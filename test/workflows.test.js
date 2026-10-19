@@ -1,0 +1,57 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+process.env.PORTSIDE_DATA_FILE = ':memory:';
+const { server } = require('../server');
+test('account recovery, private conversations, idempotent requests, saved quotes and admin workflows', async () => {
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const request = async (path, data, cookie, method) => {
+    const response = await fetch(base + path, { method: method || (data === undefined ? 'GET' : 'POST'), headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+    return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] };
+  };
+  try {
+    const registered = await request('/api/register', { username: 'alice', name: 'Alice', password: 'LongPassword123!' });
+    assert.equal(registered.status, 201); assert.ok(registered.body.recoveryCode); assert.equal(registered.body.user.role, 'user');
+    let cookie = registered.cookie;
+    const other = await request('/api/register', { username: 'bobby', name: 'Bob', password: 'LongPassword123!' });
+    const c = (await request('/api/conversations', {}, cookie)).body.conversation;
+    assert.equal((await request(`/api/conversations/${c.id}`, undefined, other.cookie)).status, 404);
+    const chat = { conversationId: c.id, requestId: 'question-1', message: 'Can I import a van?' };
+    const sent = await request('/api/chat', chat, cookie); assert.equal(sent.body.conversation.messages.length, 2);
+    const duplicate = await request('/api/chat', chat, cookie); assert.equal(duplicate.body.conversation.messages.length, 2);
+    const admin = await request('/api/login', { username: 'admin', password: process.env.ADMIN_PASSWORD || 'Admin@2026' });
+    let dashboard = await request('/api/admin', undefined, admin.cookie);
+    const question = dashboard.body.unresolved.find((q) => q.question === chat.message); assert.ok(question);
+    assert.equal((await request('/api/answers', { id: question.id, answer: 'An admin answer.' }, cookie)).status, 403);
+    assert.equal((await request('/api/answers', { id: question.id, answer: 'An admin answer.' }, admin.cookie)).status, 200);
+    const learned = await request('/api/chat', { ...chat, requestId: 'question-2' }, cookie); assert.equal(learned.body.reply.content, 'An admin answer.');
+    const serviceData = { conversationId: c.id, requestId: 'service-1', input: { model: 'Toyota Harrier', registration: '2019-12', engine: 2000, fuel: 'Petrol', value: 1850000, freight: 120000, fees: 80000 } };
+    const quote = await request('/api/services/quote', serviceData, cookie); assert.equal(quote.status, 200); assert.ok(quote.body.reply.result.total);
+    const retry = await request('/api/services/quote', serviceData, cookie); assert.equal(retry.body.reply.id, quote.body.reply.id);
+    const payload = { conversationId: c.id, messageId: quote.body.reply.id };
+    assert.equal((await request('/api/quotes', payload, other.cookie)).status, 404);
+    const saved = await request('/api/quotes', payload, cookie); const savedAgain = await request('/api/quotes', payload, cookie); assert.equal(saved.body.quote.id, savedAgain.body.quote.id);
+    assert.equal((await request('/api/quotes', undefined, cookie)).body.total, 1); assert.equal((await request('/api/quotes', undefined, other.cookie)).body.total, 0);
+    await request(`/api/conversations/${c.id}`, { completed: true, title: 'My first import' }, cookie);
+    assert.equal((await request('/api/chat', { ...chat, requestId: 'after-completion' }, cookie)).status, 400);
+    dashboard = await request('/api/admin?search=van', undefined, admin.cookie); assert.equal(dashboard.body.metrics.completionRate, 100); assert.equal(dashboard.body.knowledgePage.total, 1);
+    const answer = dashboard.body.knowledgePage.items[0];
+    await request('/api/admin/knowledge', { id: answer.id, question: answer.question, answer: 'Updated answer' }, admin.cookie);
+    assert.equal((await request('/api/knowledge', undefined, cookie)).body.knowledge[0].answer, 'Updated answer');
+    assert.equal((await request(`/api/admin/knowledge/${answer.id}`, undefined, other.cookie, 'DELETE')).status, 403);
+    assert.equal((await request(`/api/admin/knowledge/${answer.id}`, undefined, admin.cookie, 'DELETE')).status, 200);
+    for (let i = 0; i < 11; i++) await request('/api/conversations', {}, cookie);
+    assert.equal((await request('/api/conversations?page=1', undefined, cookie)).body.items.length, 10); assert.equal((await request('/api/conversations?page=2', undefined, cookie)).body.items.length, 2);
+    assert.equal((await request('/api/reset-password', { username: 'alice', recoveryCode: 'wrong', password: 'AnotherPassword123!' })).status, 400);
+    const reset = await request('/api/reset-password', { username: 'alice', recoveryCode: registered.body.recoveryCode, password: 'AnotherPassword123!' }); assert.ok(reset.body.recoveryCode);
+    assert.equal((await request('/api/session', undefined, cookie)).status, 401);
+    assert.equal((await request('/api/reset-password', { username: 'alice', recoveryCode: registered.body.recoveryCode, password: 'AnotherPassword123!' })).status, 400);
+    const login = await request('/api/login', { username: 'alice', password: 'AnotherPassword123!' }); cookie = login.cookie;
+    assert.equal((await request('/api/quotes', undefined, cookie)).body.total, 1);
+    const profile = await request('/api/profile', { name: 'Alice New', currentPassword: 'AnotherPassword123!', password: 'ThirdPassword123!', rotateRecovery: true }, cookie); assert.equal(profile.body.user.name, 'Alice New'); assert.ok(profile.body.recoveryCode);
+    assert.equal((await request('/api/session', undefined, cookie)).status, 401);
+    cookie = profile.cookie;
+    await request(`/api/conversations/${c.id}`, undefined, cookie, 'DELETE'); assert.equal((await request('/api/quotes', undefined, cookie)).body.total, 1);
+    await request(`/api/quotes/${saved.body.quote.id}`, undefined, cookie, 'DELETE'); assert.equal((await request('/api/quotes', undefined, cookie)).body.total, 0);
+  } finally { await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }); }
+});
