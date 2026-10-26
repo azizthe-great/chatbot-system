@@ -14,8 +14,8 @@ if (fs.existsSync(envPath)) {
 module.exports = {
   host: process.env.HOST || '127.0.0.1',
   port: Number(process.env.PORT) || 3000,
-  // Local development works without an environment file; override for other environments.
-  databaseUrl: process.env.DATABASE_URL || 'postgres://portside_user:portside_local_dev@127.0.0.1:5432/portside',
+  // DATABASE_URL must be configured in the local .env file or deployment environment.
+  databaseUrl: process.env.DATABASE_URL,
   nodeEnv: process.env.NODE_ENV || 'development',
   sessionTtlHours: Math.max(1, Number(process.env.SESSION_TTL_HOURS) || 8),
   cookieSecure: process.env.COOKIE_SECURE === 'true' || (process.env.NODE_ENV || '').toLowerCase() === 'production',
