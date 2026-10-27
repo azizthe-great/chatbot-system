@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-const unavailable = 'Google sign-in is currently unavailable. You can use your username and password.';
+const unavailable = 'Google sign-in is currently unavailable. You can use your email and password.';
 
 async function configureGoogle(page, enabled) {
   await page.route('**/api/auth/config', (route) => route.fulfill({ json: { googleEnabled: enabled } }));
@@ -53,8 +53,8 @@ test('unconfigured Google sign-in explains availability and preserves password l
   await page.goto('/#login');
   await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeDisabled();
   await expect(page.getByText(unavailable, { exact: true })).toBeVisible();
-  await page.locator('#login-form').getByLabel('Username', { exact: true }).fill('importer');
-  await page.getByLabel('Password', { exact: true }).fill('Importer@2026');
+  await page.locator('#login-form').getByLabel('Email', { exact: true }).fill('importer@example.test');
+  await page.getByLabel('Password', { exact: true }).fill('Importer-password-1!');
   await page.locator('#auth-submit').click();
   await expect(page.locator('#importer-view')).toBeVisible();
   await expect(page.locator('#welcome-view')).toBeHidden();
@@ -80,7 +80,7 @@ test('Google callback errors return to login and never render raw query content'
   await configureGoogle(page, true);
   await page.goto('/?auth_error=google_cancelled');
   await expect(page.locator('#login-view')).toBeVisible();
-  await expect(page.locator('#notice')).toHaveText('Google sign-in was cancelled. Try again or use your username and password.');
+  await expect(page.locator('#notice')).toHaveText('Google sign-in was cancelled. Try again or use your email and password.');
   await expect(page).toHaveURL(/\/#login$/);
 
   await page.goto('/?auth_error=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E');
@@ -95,7 +95,7 @@ test('Google callback errors return to login and never render raw query content'
 });
 
 test('Google account settings show email and support name changes without password fields', async ({ page }) => {
-  const user = { username: 'google_test', name: 'Google User', role: 'user', authProvider: 'google', email: 'person@example.com' };
+  const user = { id: '00000000-0000-4000-8000-000000000001', name: 'Google User', role: 'customer', authProvider: 'google', email: 'person@example.com' };
   let profileInput;
   await configureGoogle(page, true);
   await page.route('**/api/session', (route) => route.fulfill({ json: { user } }));

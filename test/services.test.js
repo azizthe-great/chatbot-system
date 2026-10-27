@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runService, currentMonth } = require('../services');
+const { runService, currentMonth } = require('../src/services/import-services');
 const vehicle = { model: 'Toyota Harrier', registration: '2019-12', engine: 2000, fuel: 'Petrol', value: 1850000, freight: 120000, fees: 80000 };
 test('estimates respond to each relevant input and totals reconcile', async () => {
   const base = await runService('quote', vehicle);

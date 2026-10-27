@@ -1,5 +1,9 @@
-data/
 node_modules/
 .env
+.env.*
+!.env.example
+data/
+coverage/
 test-results/
 playwright-report/
+npm-debug.log*

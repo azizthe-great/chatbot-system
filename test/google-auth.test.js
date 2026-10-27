@@ -1,9 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { generateKeyPairSync, sign, createHash } = require('node:crypto');
-process.env.PORTSIDE_DATA_FILE = ':memory:';
-const { server } = require('../server');
-const { state } = require('../store');
+const { setup } = require('./support/app');
 
 test('Google authorization code login validates the browser and identity before creating a private account', async (t) => {
   const originalEnv = Object.fromEntries(['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI', 'NODE_ENV'].map((key) => [key, process.env[key]]));
@@ -11,15 +9,19 @@ test('Google authorization code login validates the browser and identity before 
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'google-test-key', alg: 'RS256', use: 'sig' };
   let tokenResult, tokenStatus = 200, tokenCalls = [], keyCalls = 0;
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const ctx = await setup(t), db = ctx.db;
+  const base = 'http://127.0.0.1:3000';
   const configure = () => {
     process.env.GOOGLE_CLIENT_ID = 'test-client.apps.googleusercontent.com';
     process.env.GOOGLE_CLIENT_SECRET = 'server-only-secret';
     process.env.GOOGLE_REDIRECT_URI = `${base}/api/auth/google/callback`;
     process.env.NODE_ENV = 'test';
   };
-  const request = (route, options = {}) => realFetch(base + route, { redirect: 'manual', ...options });
+  const request = async (route, options = {}) => {
+    const response = await ctx.app.inject({ method: options.method || 'GET', url: route, headers: options.headers || {}, ...(options.body ? { payload: options.body } : {}) });
+    const cookies = [].concat(response.headers['set-cookie'] || []);
+    return { status: response.statusCode, text: async () => response.body, json: async () => response.json(), headers: { get: (name) => name === 'set-cookie' ? (cookies.length ? cookies.join(', ') : null) : response.headers[name] ?? null } };
+  };
   const cookie = (response, name) => new RegExp(`(?:^|,\\s*)(${name}=[^;,]*)`).exec(response.headers.get('set-cookie') || '')?.[1];
   const getJson = async (route, session) => {
     const response = await request(route, { headers: session ? { Cookie: session } : {} });
@@ -27,7 +29,7 @@ test('Google authorization code login validates the browser and identity before 
   };
   const post = async (route, data, session) => {
     const response = await request(route, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { Cookie: session } : {}) }, body: JSON.stringify(data) });
-    return { response, body: await response.json() };
+    return { response: { status: response.status }, body: await response.json() };
   };
   const begin = async () => {
     const response = await request('/api/auth/google');
@@ -77,7 +79,7 @@ test('Google authorization code login validates the browser and identity before 
       assert.equal(params.get('redirect_uri'), process.env.GOOGLE_REDIRECT_URI);
       assert.equal(params.get('code_challenge_method'), 'S256');
       assert.ok(!flow.response.headers.get('location').includes(process.env.GOOGLE_CLIENT_SECRET));
-      assert.match(flow.response.headers.get('set-cookie'), /HttpOnly; SameSite=Lax; Path=\/api\/auth\/google; Max-Age=600/);
+      assert.match(flow.response.headers.get('set-cookie'), /Max-Age=600; Path=\/api\/auth\/google; HttpOnly; SameSite=Lax/);
       tokenResult = { id_token: jwt(flow), access_token: 'never-expose-this', refresh_token: 'never-save-this' };
       const response = await finish(flow);
       assert.equal(response.headers.get('location'), '/');
@@ -85,8 +87,9 @@ test('Google authorization code login validates the browser and identity before 
       assert.match(response.headers.get('set-cookie'), /portside_session=.*HttpOnly; SameSite=Strict/);
       firstSession = cookie(response, 'portside_session');
       const session = await getJson('/api/session', firstSession); firstUser = session.body.user;
-      assert.equal(firstUser.authProvider, 'google'); assert.equal(firstUser.role, 'user'); assert.equal(firstUser.email, 'person@example.com');
-      assert.ok(!JSON.stringify(session).includes('never-expose-this')); assert.ok(!JSON.stringify(state).includes('never-save-this'));
+      assert.equal(firstUser.authProvider, 'google'); assert.equal(firstUser.role, 'customer'); assert.equal(firstUser.email, 'person@example.com');
+      assert.ok(!JSON.stringify(session).includes('never-expose-this'));
+      for (const table of ['users', 'sessions', 'audit_events']) assert.ok(!JSON.stringify((await db.query(`SELECT * FROM ${table}`)).rows).includes('never-save-this'));
       const exchange = tokenCalls.at(-1);
       assert.equal(exchange.get('client_secret'), process.env.GOOGLE_CLIENT_SECRET);
       assert.equal(exchange.get('redirect_uri'), process.env.GOOGLE_REDIRECT_URI);
@@ -96,15 +99,16 @@ test('Google authorization code login validates the browser and identity before 
       assert.equal(tokenCalls.length, 1);
     });
     await t.test('subject stays stable when email changes and matching emails never link local or Google accounts', async () => {
-      const localAdmin = state.accounts.find((account) => account.username === 'admin'); localAdmin.email = 'shared@example.com';
+      await db.query("UPDATE users SET email='shared@example.com' WHERE role='admin'");
       let flow = await begin(); tokenResult = { id_token: jwt(flow, { email: 'shared@example.com' }) };
       let response = await finish(flow), session = cookie(response, 'portside_session');
-      assert.equal((await getJson('/api/session', session)).body.user.username, firstUser.username);
-      assert.equal((await getJson('/api/session', session)).body.user.role, 'user');
+      assert.equal((await getJson('/api/session', session)).body.user.id, firstUser.id);
+      assert.equal((await getJson('/api/session', session)).body.user.email, 'shared@example.com');
+      assert.equal((await getJson('/api/session', session)).body.user.role, 'customer');
       flow = await begin(); tokenResult = { id_token: jwt(flow, { sub: 'google-person-two', email: 'shared@example.com' }) };
       response = await finish(flow); session = cookie(response, 'portside_session');
       const second = (await getJson('/api/session', session)).body.user;
-      assert.notEqual(second.username, firstUser.username); assert.notEqual(second.username, 'admin'); assert.equal(second.role, 'user');
+      assert.notEqual(second.id, firstUser.id); assert.equal(second.role, 'customer');
       const created = await post('/api/conversations', {}, firstSession);
       assert.equal((await getJson(`/api/conversations/${created.body.conversation.id}`, session)).status, 404);
       assert.equal(keyCalls, 1, 'Google keys are cached between logins');
@@ -115,9 +119,9 @@ test('Google authorization code login validates the browser and identity before 
       const blocked = await post('/api/profile', { name: 'Wrong name', password: 'AttackerPassword123!', rotateRecovery: true }, firstSession);
       assert.equal(blocked.response.status, 400);
       assert.equal((await getJson('/api/session', firstSession)).body.user.name, 'My chosen name');
-      const account = state.accounts.find((item) => item.username === firstUser.username);
-      assert.equal(account.passwordHash, undefined); assert.equal(account.recoveryHash, undefined);
-      assert.equal((await post('/api/login', { username: firstUser.username, password: 'AttackerPassword123!' })).response.status, 401);
+      const account = (await db.query('SELECT password_hash,recovery_hash FROM users WHERE id=$1', [firstUser.id])).rows[0];
+      assert.equal(account.password_hash, null); assert.equal(account.recovery_hash, null);
+      assert.equal((await post('/api/auth/login', { email: 'shared@example.com', password: 'AttackerPassword123!' })).response.status, 401);
     });
     await t.test('state must match the browser and callbacks expire or cancel without creating a session', async () => {
       let flow = await begin(); tokenResult = { id_token: jwt(flow) };
@@ -169,6 +173,5 @@ test('Google authorization code login validates the browser and identity before 
   } finally {
     Date.now = realNow; global.fetch = realFetch;
     for (const [key, value] of Object.entries(originalEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
-    await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
   }
 });

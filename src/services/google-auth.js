@@ -1,5 +1,5 @@
+'use strict';
 const { randomBytes, createHash, timingSafeEqual, createPublicKey, verify } = require('node:crypto');
-const auth = require('./auth');
 
 // Google discovery metadata: https://accounts.google.com/.well-known/openid-configuration
 // Fixed Google endpoints avoid trusting URLs from requests or ID-token headers.
@@ -22,39 +22,28 @@ function configuration() {
     return { clientId, clientSecret, redirectUri, secure: url.protocol === 'https:' };
   } catch { return null; }
 }
-function appendCookie(response, value) {
-  const previous = response.getHeader('Set-Cookie');
-  response.setHeader('Set-Cookie', [...(Array.isArray(previous) ? previous : previous ? [previous] : []), value]);
-}
-function browserCookie(request) {
-  const values = (request.headers.cookie || '').split(';').map((part) => part.trim()).filter((part) => part.startsWith(`${cookieName}=`));
-  return values.length === 1 ? values[0].slice(cookieName.length + 1) : '';
-}
-function setBrowserCookie(response, value, secure) {
-  appendCookie(response, `${cookieName}=${value}; HttpOnly; SameSite=Lax; Path=/api/auth/google; Max-Age=${value ? lifetime / 1000 : 0}${secure ? '; Secure' : ''}`);
-}
-function redirect(response, error) {
-  response.writeHead(302, { Location: error ? `/?auth_error=${error}#login` : '/', 'Cache-Control': 'no-store' });
-  response.end();
+function errorLocation(error) { return `/?auth_error=${error}#login`; }
+function browserCookie(value, secure) {
+  return { name: cookieName, value, options: { httpOnly: true, sameSite: 'lax', path: '/api/auth/google', maxAge: value ? lifetime / 1000 : 0, secure } };
 }
 function equal(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
-function start(request, response) {
+// Returns where to send the browser and the cookie that binds the flow to it.
+function start(previousBrowser) {
   const config = configuration();
-  if (!config) { redirect(response, 'google_unavailable'); return; }
-  const previousBrowser = browserCookie(request), now = Date.now();
+  if (!config) return { location: errorLocation('google_unavailable') };
+  const now = Date.now();
   for (const [state, entry] of pending) if (entry.expires <= now || equal(entry.browser, previousBrowser)) pending.delete(state);
-  if (pending.size >= 1000) { redirect(response, 'google_unavailable'); return; }
+  if (pending.size >= 1000) return { location: errorLocation('google_unavailable') };
   const state = randomBytes(32).toString('base64url'), browser = randomBytes(32).toString('base64url');
   const nonce = randomBytes(32).toString('base64url'), verifier = randomBytes(32).toString('base64url');
   pending.set(state, { browser, nonce, verifier, expires: now + lifetime, clientId: config.clientId, redirectUri: config.redirectUri });
   const destination = new URL(authorizationEndpoint);
   destination.search = new URLSearchParams({ client_id: config.clientId, redirect_uri: config.redirectUri, response_type: 'code', scope: 'openid email profile', state, nonce, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', access_type: 'online', prompt: 'select_account' }).toString();
-  setBrowserCookie(response, browser, config.secure);
-  response.writeHead(302, { Location: destination.href, 'Cache-Control': 'no-store' }); response.end();
+  return { location: destination.href, cookie: browserCookie(browser, config.secure) };
 }
 async function googleJson(url, options = {}) {
   const response = await fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(10000) });
@@ -98,25 +87,26 @@ async function identity(token, config, nonce) {
   }
   return claims;
 }
-async function callback(request, response, params) {
+// Resolves to { identity } on success or { error } naming the failure; cookie, when set, clears the flow cookie.
+async function callback(params, browser) {
   const config = configuration();
-  if (!config) { redirect(response, 'google_unavailable'); return null; }
+  if (!config) return { error: 'google_unavailable' };
   const state = params.get('state'), entry = pending.get(state);
-  if (params.getAll('state').length !== 1 || !entry || entry.expires <= Date.now() || !equal(entry.browser, browserCookie(request)) || entry.clientId !== config.clientId || entry.redirectUri !== config.redirectUri) {
+  if (params.getAll('state').length !== 1 || !entry || entry.expires <= Date.now() || !equal(entry.browser, browser) || entry.clientId !== config.clientId || entry.redirectUri !== config.redirectUri) {
     if (entry?.expires <= Date.now()) pending.delete(state);
-    redirect(response, 'google_invalid'); return null;
+    return { error: 'google_invalid' };
   }
   // Consume before network I/O so concurrent callbacks cannot replay the flow.
   pending.delete(state);
-  setBrowserCookie(response, '', config.secure);
-  if (params.getAll('error').length > 1 || params.getAll('code').length > 1 || params.getAll('iss').length > 1 || (params.has('iss') && params.get('iss') !== 'https://accounts.google.com')) { redirect(response, 'google_invalid'); return null; }
-  if (params.has('error')) { redirect(response, params.get('error') === 'access_denied' ? 'google_cancelled' : 'google_failed'); return null; }
+  const cookie = browserCookie('', config.secure);
+  if (params.getAll('error').length > 1 || params.getAll('code').length > 1 || params.getAll('iss').length > 1 || (params.has('iss') && params.get('iss') !== 'https://accounts.google.com')) return { error: 'google_invalid', cookie };
+  if (params.has('error')) return { error: params.get('error') === 'access_denied' ? 'google_cancelled' : 'google_failed', cookie };
   const code = params.get('code');
-  if (!code || code.length > 4096) { redirect(response, 'google_invalid'); return null; }
+  if (!code || code.length > 4096) return { error: 'google_invalid', cookie };
   try {
     const body = new URLSearchParams({ code, client_id: config.clientId, client_secret: config.clientSecret, redirect_uri: config.redirectUri, grant_type: 'authorization_code', code_verifier: entry.verifier });
     const { data } = await googleJson(tokenEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-    return auth.google(await identity(data.id_token, config, entry.nonce));
-  } catch (error) { redirect(response, error.authError === 'google_email_unverified' ? error.authError : 'google_failed'); return null; }
+    return { identity: await identity(data.id_token, config, entry.nonce), cookie };
+  } catch (error) { return { error: error.authError === 'google_email_unverified' ? error.authError : 'google_failed', cookie }; }
 }
-module.exports = { enabled: () => !!configuration(), start, callback, redirect };
+module.exports = { enabled: () => !!configuration(), start, callback, errorLocation, cookieName };

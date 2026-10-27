@@ -17,7 +17,7 @@ async function api(path, data, method = data === undefined ? 'GET' : 'POST') {
   try {
     const response = await fetch(path, { method, credentials: 'same-origin', headers: data === undefined ? {} : { 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: controller.signal });
     let result; try { result = await response.json(); } catch { throw new Error('The server returned an unreadable response. Please retry.'); }
-    if (!response.ok) { if (response.status === 401 && user) showLogin('Your session has expired. Sign in to continue; saved work is in your library.'); throw new Error(result.error || 'Request failed. Please retry.'); }
+    if (!response.ok) { if (response.status === 401 && user) showLogin('Your session has expired. Sign in to continue; saved work is in your library.'); throw new Error(typeof result.error === 'string' ? result.error : result.error?.message || 'Request failed. Please retry.'); }
     return result;
   } catch (error) { if (error.name === 'AbortError') throw new Error('The request was interrupted or timed out. Please retry.'); if (error instanceof TypeError) throw new Error('Could not reach the server. Check your connection and retry.'); throw error; }
   finally { clearTimeout(timer); controllers.delete(controller); }
@@ -34,7 +34,8 @@ function showLogin(message = '', mode = 'login', syncHash = true) {
   for (const controller of controllers) controller.abort();
   for (const el of $$('[id$="-view"], #app-nav, #account-menu')) el.hidden = true;
   $('#login-view').hidden = false; $('#admin-nav').hidden = true; $('#public-nav').hidden = true;
-  for (const selector of ['#messages', '#conversation-list', '#quote-list', '#unresolved-queue', '#knowledge-list', '#metrics', '#activity-chart', '#model-chart']) $(selector).replaceChildren();
+  for (const selector of ['#messages', '#conversation-list', '#quote-list', '#unresolved-queue', '#knowledge-list', '#metrics', '#activity-chart', '#model-chart', '#customer-vehicles', '#customer-enquiries', '#admin-enquiries-list']) $(selector).replaceChildren();
+  $('#vehicle-form').reset(); $('#enquiry-form').reset(); $('#records-status').textContent = ''; $('#admin-enquiry-status').textContent = '';
   $('#profile-form').reset(); $('#knowledge-form').reset(); $('#admin-filters').reset(); libraryPage = quotePage = queuePage = knowledgePage = 1; $('#profile-recovery').hidden = true; $('#profile-recovery-code').textContent = '';
   $('#recovery-result').hidden = true; $('#recovery-code').textContent = ''; recoveryCode = ''; pendingUser = null;
   setAuthMode(mode); notify(message, !!message); if (syncHash) history.replaceState(null, '', `${location.pathname}#${mode === 'register' ? 'register' : 'login'}`); $('#login-title').focus();
@@ -48,11 +49,11 @@ function showWelcome(syncHash = true) {
 function routePublic() {
   if (user) return;
   const errors = {
-    google_unavailable: 'Google sign-in is currently unavailable. You can use your username and password.',
-    google_cancelled: 'Google sign-in was cancelled. Try again or use your username and password.',
+    google_unavailable: 'Google sign-in is currently unavailable. You can use your email and password.',
+    google_cancelled: 'Google sign-in was cancelled. Try again or use your email and password.',
     google_invalid: 'Your Google sign-in request expired or could not be verified. Please try again.',
     google_failed: 'Could not complete Google sign-in. Please try again.',
-    google_email_unverified: 'Google could not confirm your email address. Try another Google account or sign in with your username.'
+    google_email_unverified: 'Google could not confirm your email address. Try another Google account or sign in with your email.'
   };
   const params = new URLSearchParams(location.search);
   if (params.has('auth_error')) { const key = params.get('auth_error'); showLogin(Object.hasOwn(errors, key) ? errors[key] : 'Could not complete sign-in. Please try again.'); return; }
@@ -68,7 +69,7 @@ window.addEventListener('popstate', () => routePublic());
 function updateGoogleOption() {
   $('#google-option').hidden = authMode === 'reset' || !$('#recovery-result').hidden;
   $('#google-login').disabled = googleEnabled !== true;
-  $('#google-status').textContent = googleConfigFailed ? 'Could not load Google sign-in. You can retry or use your username and password.' : googleEnabled === null ? 'Checking sign-in options…' : googleEnabled ? 'Use your Google account to sign in or create a Portside account.' : 'Google sign-in is currently unavailable. You can use your username and password.';
+  $('#google-status').textContent = googleConfigFailed ? 'Could not load Google sign-in. You can retry or use your email and password.' : googleEnabled === null ? 'Checking sign-in options…' : googleEnabled ? 'Use your Google account to sign in or create a Portside account.' : 'Google sign-in is currently unavailable. You can use your email and password.';
   $('#retry-google-config').hidden = !googleConfigFailed;
 }
 async function loadAuthOptions() {
@@ -83,7 +84,7 @@ window.addEventListener('pageshow', updateGoogleOption);
 async function showApp(account) {
   user = account; epoch++; const token = epoch; activeView = 'importer'; conversation = null; creating = null;
   $('#login-view').hidden = true; $('#welcome-view').hidden = true; $('#public-nav').hidden = true; history.replaceState(null, '', location.pathname); $('#app-nav').hidden = false; $('#account-menu').hidden = false; $('#admin-nav').hidden = user.role !== 'admin';
-  $('#account-name').textContent = user.name || user.username; notify(''); switchView('importer'); renderConversation();
+  $('#account-name').textContent = user.name || user.email; $('.records-card').hidden = user.role !== 'customer'; notify(''); switchView('importer'); renderConversation();
   try { catalog = await api('/api/catalog'); if (token !== epoch) return; const count = Object.values(catalog.providers).filter(Boolean).length; $('#data-mode').textContent = count === 0 ? 'Demo data' : count === 4 ? 'Connected providers' : 'Mixed data sources'; }
   catch (error) { if (token === epoch) notify(`Could not load service settings. ${error.message}`, true); }
 }
@@ -93,13 +94,13 @@ function switchView(view) {
   for (const name of ['importer', 'library', 'admin', 'profile']) $(`#${name}-view`).hidden = name !== view;
   for (const button of $$('[data-view]')) { if (button.dataset.view === view) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }
   $(`#${view === 'importer' ? 'assistant' : view}-title`).focus();
-  if (view === 'library') loadLibrary();
+  if (view === 'library') { loadLibrary(); loadCustomerRecords(); }
   if (view === 'admin') renderAdmin();
-  if (view === 'profile') { const form = $('#profile-form'); form.reset(); form.elements.username.value = user.username; form.elements.name.value = user.name || user.username; $('#profile-feedback').textContent = ''; $('#profile-recovery').hidden = true; $('#profile-recovery-code').textContent = ''; const google = user.authProvider === 'google'; $('#profile-identity-label').textContent = google ? 'Email address' : 'Username'; form.elements.username.value = google ? user.email : user.username; $('#password-settings').hidden = google; for (const input of $$('#password-settings input')) input.disabled = google; $('#google-account-note').hidden = !google; if (google && user.email) $('#google-account-note').textContent = `You sign in with Google (${user.email}). Manage your password and account recovery in your Google account.`; }
+  if (view === 'profile') { const form = $('#profile-form'); form.reset(); form.elements.email.value = user.email; form.elements.name.value = user.name || user.email; $('#profile-feedback').textContent = ''; $('#profile-recovery').hidden = true; $('#profile-recovery-code').textContent = ''; const google = user.authProvider === 'google'; $('#password-settings').hidden = google; for (const input of $$('#password-settings input')) input.disabled = google; $('#google-account-note').hidden = !google; if (google && user.email) $('#google-account-note').textContent = `You sign in with Google (${user.email}). Manage your password and account recovery in your Google account.`; }
 }
 for (const button of $$('[data-view]')) button.addEventListener('click', () => switchView(button.dataset.view));
 function setAuthMode(mode) {
-  authMode = mode; $('#login-form').reset(); $('#password').type = 'password'; $('#toggle-password').textContent = 'Show'; $('#toggle-password').setAttribute('aria-pressed', 'false'); $('#toggle-password').setAttribute('aria-label', 'Show password'); $('#login-error').hidden = true; $('#login-form').hidden = false; $('#recovery-result').hidden = true; $('#demo-hint').hidden = mode !== 'login';
+  authMode = mode; $('#login-form').reset(); $('#password').type = 'password'; $('#toggle-password').textContent = 'Show'; $('#toggle-password').setAttribute('aria-pressed', 'false'); $('#toggle-password').setAttribute('aria-label', 'Show password'); $('#login-error').hidden = true; $('#login-form').hidden = false; $('#recovery-result').hidden = true;
   $('#name-field').hidden = mode !== 'register'; $('#recovery-field').hidden = mode !== 'reset';
   $('#login-form').elements.name.required = mode === 'register'; $('#login-form').elements.recoveryCode.required = mode === 'reset';
   $('#password-label').textContent = mode === 'reset' ? 'New password' : 'Password'; $('#password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
@@ -113,7 +114,7 @@ $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const button = $('#auth-submit'), mode = authMode; button.disabled = true; $('#login-error').hidden = true;
   for (const item of $$('[data-auth]')) item.disabled = true;
   try {
-    const data = Object.fromEntries(new FormData(event.target)), result = await api(mode === 'login' ? '/api/login' : mode === 'register' ? '/api/register' : '/api/reset-password', data);
+    const data = Object.fromEntries(new FormData(event.target)), result = await api(mode === 'login' ? '/api/auth/login' : mode === 'register' ? '/api/auth/register' : '/api/auth/reset-password', data);
     event.target.reset();
     if (result.recoveryCode) { recoveryCode = result.recoveryCode; pendingUser = result.user || null; $('#recovery-code').textContent = recoveryCode; $('#login-form').hidden = true; $('#recovery-result').hidden = false; updateGoogleOption(); $('#recovery-result').scrollIntoView({ block: 'nearest' }); }
     else await showApp(result.user);
@@ -121,16 +122,16 @@ $('#login-form').addEventListener('submit', async (event) => {
   finally { button.disabled = false; for (const item of $$('[data-auth]')) item.disabled = false; }
 });
 function download(filename, content, type = 'text/plain') { const url = URL.createObjectURL(new Blob([content], { type })); const link = node('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-$('#download-recovery').addEventListener('click', () => download('portside-recovery.txt', `Portside private recovery code\nUsername: ${pendingUser?.username || 'your account'}\nCode: ${recoveryCode}\nKeep this private. Each password recovery replaces the previous code.`));
+$('#download-recovery').addEventListener('click', () => download('portside-recovery.txt', `Portside private recovery code\nEmail: ${pendingUser?.email || 'your account'}\nCode: ${recoveryCode}\nKeep this private. Each password recovery replaces the previous code.`));
 $('#continue-auth').addEventListener('click', () => { const account = pendingUser; recoveryCode = ''; pendingUser = null; $('#recovery-code').textContent = ''; if (account) showApp(account); else { setAuthMode('login'); notify('Password reset. Sign in using your new password.'); } });
-$('#logout').addEventListener('click', async () => { $('#logout').disabled = true; try { await api('/api/logout', {}); showWelcome(); } catch (error) { notify(error.message, true); } finally { $('#logout').disabled = false; } });
+$('#logout').addEventListener('click', async () => { $('#logout').disabled = true; try { await api('/api/auth/logout', {}); showWelcome(); } catch (error) { notify(error.message, true); } finally { $('#logout').disabled = false; } });
 $('#profile-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const button = event.target.querySelector('button[type=submit]'), token = epoch; button.disabled = true;
-  try { const data = Object.fromEntries(new FormData(event.target)); data.rotateRecovery = user.authProvider !== 'google' && event.target.elements.rotateRecovery.checked; const result = await api('/api/profile', data); if (token !== epoch) return; user = result.user; $('#account-name').textContent = user.name; event.target.elements.currentPassword.value = ''; event.target.elements.password.value = ''; event.target.elements.rotateRecovery.checked = false; feedback($('#profile-feedback'), 'Account updated.'); $('#profile-recovery').hidden = !result.recoveryCode; $('#profile-recovery-code').textContent = result.recoveryCode || ''; }
+  try { const data = Object.fromEntries(new FormData(event.target)); delete data.email; data.rotateRecovery = user.authProvider !== 'google' && event.target.elements.rotateRecovery.checked; const result = await api('/api/profile', data); if (token !== epoch) return; user = result.user; $('#account-name').textContent = user.name; event.target.elements.currentPassword.value = ''; event.target.elements.password.value = ''; event.target.elements.rotateRecovery.checked = false; feedback($('#profile-feedback'), 'Account updated.'); $('#profile-recovery').hidden = !result.recoveryCode; $('#profile-recovery-code').textContent = result.recoveryCode || ''; }
   catch (error) { if (token === epoch) feedback($('#profile-feedback'), error.message, true); }
   finally { button.disabled = false; }
 });
-$('#download-profile-recovery').addEventListener('click', () => download('portside-recovery.txt', `Portside private recovery code\nUsername: ${user.username}\nCode: ${$('#profile-recovery-code').textContent}\nKeep this private.`));
+$('#download-profile-recovery').addEventListener('click', () => download('portside-recovery.txt', `Portside private recovery code\nEmail: ${user.email}\nCode: ${$('#profile-recovery-code').textContent}\nKeep this private.`));
 function bubble(content, role = 'assistant', at) { const el = node('article', `message ${role === 'user' ? 'user-message' : 'bot-message'}`); el.setAttribute('aria-label', role === 'user' ? 'You' : 'Portside'); if (content) el.append(node('p', '', content)); if (at) { const time = node('time', '', date(at)); time.dateTime = at; el.append(time); } $('#messages').append(el); return el; }
 function appendBeforeTime(parent, child) { const time = parent.querySelector(':scope > time'); parent.insertBefore(child, time || null); }
 function resultText(result) { return `${result.title}\nSource: ${result.source}\nGenerated: ${date(result.updatedAt)}\n${result.input ? Object.entries(result.input).map(([key, value]) => `${key}: ${value}`).join('\n') : ''}\n\n${result.rows.map(([label, value]) => `${label}: ${typeof value === 'number' ? money(value) : value}`).join('\n')}\n${result.total !== undefined ? `Total: ${money(result.total)}\n` : ''}\n${result.notice}`; }
@@ -246,10 +247,67 @@ async function loadLibrary() {
   } catch (error) { if (version !== libraryVersion || token !== epoch) return; $('#library-feedback').replaceChildren(node('p', 'error', error.message)); const retry = node('button', 'secondary', 'Retry'); retry.addEventListener('click', loadLibrary); $('#library-feedback').append(retry); }
 }
 $('#refresh-library').addEventListener('click', loadLibrary);
+async function loadCustomerRecords() {
+  if (user?.role !== 'customer') return;
+  const token = epoch, status = $('#records-status'); status.textContent = 'Loading your saved records…';
+  try {
+    const [vehicleData, enquiryData] = await Promise.all([api('/api/vehicles'), api('/api/enquiries')]); if (token !== epoch) return;
+    const vehicleList = $('#customer-vehicles'), vehicleSelect = $('#enquiry-form').elements.vehicleId; vehicleList.replaceChildren(); vehicleSelect.replaceChildren(new Option('No vehicle selected', ''));
+    if (!vehicleData.vehicles.length) vehicleList.append(node('p', 'empty', 'No vehicles saved yet.'));
+    for (const vehicle of vehicleData.vehicles) {
+      const name = `${vehicle.year ? `${vehicle.year} ` : ''}${vehicle.make} ${vehicle.model}`, item = node('div', 'record-item'); item.append(node('strong', '', name));
+      const details = [vehicle.engineCapacityCc ? `${vehicle.engineCapacityCc} cc` : '', vehicle.fuelType || '', vehicle.originCountry || '', vehicle.vin || ''].filter(Boolean).join(' · ');
+      if (details) item.append(node('div', '', details));
+      vehicleList.append(item); vehicleSelect.add(new Option(name, vehicle.id));
+    }
+    const enquiryList = $('#customer-enquiries'); enquiryList.replaceChildren();
+    if (!enquiryData.enquiries.length) enquiryList.append(node('p', 'empty', 'No enquiries yet.'));
+    for (const enquiry of enquiryData.enquiries) { const item = node('div', 'record-item'); item.append(node('strong', '', `${enquiry.reference} · ${enquiry.category}`), node('div', '', `${enquiry.status.replaceAll('_', ' ')} · ${date(enquiry.created_at)}`), node('p', '', enquiry.description)); enquiryList.append(item); }
+    status.textContent = '';
+  } catch (error) { if (token === epoch) status.textContent = error.message; }
+}
+$('#vehicle-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button'), status = $('#records-status'); button.disabled = true;
+  const data = Object.fromEntries(new FormData(form));
+  for (const key of ['year', 'engineCapacityCc']) data[key] = data[key] ? Number(data[key]) : undefined;
+  for (const key of Object.keys(data)) if (data[key] === undefined || data[key] === '') delete data[key];
+  try { await api('/api/vehicles', data); form.reset(); await loadCustomerRecords(); status.textContent = 'Vehicle saved.'; }
+  catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+$('#enquiry-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const form = event.currentTarget, button = form.querySelector('button'), status = $('#records-status'); button.disabled = true;
+  const data = Object.fromEntries(new FormData(form)); if (!data.vehicleId) delete data.vehicleId;
+  try { const result = await api('/api/enquiries', data); form.reset(); await loadCustomerRecords(); status.textContent = `Enquiry submitted: ${result.enquiry.reference}`; }
+  catch (error) { status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+async function renderAdminEnquiries() {
+  if (user?.role !== 'admin') return;
+  const token = epoch, status = $('#admin-enquiry-status'); status.textContent = 'Loading enquiries…';
+  try {
+    const data = await api('/api/admin/enquiries'); if (token !== epoch || user?.role !== 'admin') return;
+    const list = $('#admin-enquiries-list'); list.replaceChildren();
+    if (!data.enquiries.length) list.append(node('p', 'empty', 'No customer enquiries yet.'));
+    for (const enquiry of data.enquiries) {
+      const row = node('div', 'admin-enquiry'), summary = node('div');
+      summary.append(node('strong', '', `${enquiry.reference} · ${enquiry.category}`), node('small', '', `${enquiry.customerName} (${enquiry.customerEmail})`), node('p', '', enquiry.description));
+      const statusSelect = node('select'); statusSelect.setAttribute('aria-label', `Status for ${enquiry.reference}`);
+      for (const value of ['new', 'in_review', 'waiting_on_customer', 'resolved', 'closed']) statusSelect.add(new Option(value.replaceAll('_', ' '), value, false, value === enquiry.status));
+      const prioritySelect = node('select'); prioritySelect.setAttribute('aria-label', `Priority for ${enquiry.reference}`);
+      for (const value of ['low', 'normal', 'high', 'urgent']) prioritySelect.add(new Option(value, value, false, value === enquiry.priority));
+      const save = node('button', 'primary', 'Save'); save.type = 'button';
+      save.addEventListener('click', async () => { save.disabled = true; try { await api(`/api/admin/enquiries/${enquiry.id}`, { status: statusSelect.value, priority: prioritySelect.value }, 'PATCH'); status.textContent = 'Enquiry updated.'; } catch (error) { status.textContent = error.message; } finally { save.disabled = false; } });
+      row.append(summary, statusSelect, prioritySelect, save); list.append(row);
+    }
+    status.textContent = `${data.enquiries.length} customer ${data.enquiries.length === 1 ? 'enquiry' : 'enquiries'}`;
+  } catch (error) { if (token === epoch) status.textContent = error.message; }
+}
+$('#refresh-enquiries').addEventListener('click', renderAdminEnquiries);
 function adminParams() { const params = new URLSearchParams(new FormData($('#admin-filters'))); params.set('queuePage', queuePage); params.set('knowledgePage', knowledgePage); return params; }
 function metric(label, value, caption) { const card = node('div', 'metric'); card.append(node('small', '', label), node('strong', '', String(value)), node('p', '', caption)); return card; }
 async function renderAdmin() {
-  if (user?.role !== 'admin') return; const version = ++adminVersion, token = epoch;
+  if (user?.role !== 'admin') return; const version = ++adminVersion, token = epoch; renderAdminEnquiries();
   $('#admin-content').hidden = true; $('#admin-feedback').replaceChildren(node('p', 'loading', 'Loading dashboard…')); $('#admin-updated').textContent = '';
   try {
     const data = await api(`/api/admin?${adminParams()}`); if (version !== adminVersion || token !== epoch || user?.role !== 'admin') return;

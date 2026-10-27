@@ -1,66 +1,149 @@
-# Portside — Kenya car import assistant
+# Portside — Kenya vehicle import assistant
 
-A Node.js application with a responsive importer assistant, saved conversations and estimates, account recovery, and an admin knowledge dashboard. There are no runtime npm dependencies. Playwright is a development dependency for browser testing.
+Portside is a Node.js web application with a plain HTML/CSS/JavaScript frontend. Accounts, sessions, conversations, saved estimates, the admin knowledge base, customer vehicles and enquiries, and audit events are stored in PostgreSQL. Customers can register, sign in with Google, and recover their password with a one-time recovery code. Import-cost, shipment and VIN results use clearly labelled demo data unless a provider adapter is configured.
 
-## Run
+## Requirements
 
-Requires Node.js 18 or newer.
+- Node.js 20 or newer (Fastify 5 requires Node 20+; Node 22 LTS or newer is recommended).
+- PostgreSQL 15 or newer, running locally or at an approved database host.
+- VS Code is optional.
 
-```bash
-npm start
-```
+## Windows and VS Code setup
 
-Open http://localhost:3000. `PORT` overrides the port.
+1. Install Node.js from [nodejs.org](https://nodejs.org/) and PostgreSQL from [postgresql.org/download/windows](https://www.postgresql.org/download/windows/). In the PostgreSQL installer, include **Command Line Tools**. Remember the password you set for the local PostgreSQL superuser.
+2. Open this project folder in VS Code. Open **Terminal → New Terminal** and confirm `node --version` is at least `v20` and `psql --version` works. If PowerShell blocks `npm.ps1`, use `npm.cmd` in the commands below.
+3. Install the project dependencies:
 
-| Demo role | Username | Initial password |
+   ```powershell
+   npm.cmd install
+   ```
+
+4. Create an application database role and database. Open pgAdmin, connect to the local PostgreSQL server using the installer password, and open **Query Tool**. Run these SQL statements. The development role password is local-only; change it and set the same value in `.env` if you prefer.
+
+   ```sql
+   CREATE ROLE portside_user LOGIN PASSWORD 'portside_local_dev';
+   CREATE DATABASE portside OWNER portside_user;
+   ```
+
+   Exit `psql` with `\q`.
+5. Portside defaults to the local PostgreSQL URL shown in `.env.example`, so you can start without creating `.env`. If you want a different role password, copy the file and edit the connection string in PowerShell:
+
+   ```powershell
+   Copy-Item .env.example .env
+   notepad .env
+   ```
+
+   Set `DATABASE_URL` to match your local role password. Keep `.env` private; `.gitignore` excludes it.
+6. Apply the versioned schema migrations:
+
+   ```powershell
+   npm.cmd run db:migrate
+   ```
+
+7. Create your initial local administrator. The command prompts for name, email, password, and confirmation; the password entry is hidden and must be at least 12 characters. It does not create a default account.
+
+   ```powershell
+   npm.cmd run users:create-admin
+   ```
+
+   Customers can create their own accounts on the welcome page. You can also create them with `npm.cmd run users:create-customer`.
+8. Start Portside and open `http://localhost:3000`:
+
+   ```powershell
+   npm.cmd start
+   ```
+
+9. Run automated tests:
+
+   ```powershell
+   npm.cmd test
+   ```
+
+10. Run the browser tests (optional). They start the app on PGlite with two seeded accounts and need a Chromium browser (`npx playwright install chromium`):
+
+   ```powershell
+   npm.cmd run test:e2e
+   ```
+
+The tests run the real migrations and queries against [PGlite](https://pglite.dev/), an in-process PostgreSQL build, so they need no database server and never touch the database in `DATABASE_URL`. A PostgreSQL server is still required to run the application, migrations, and user creation command.
+
+## Environment settings
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string; defaults to the local `portside` database |
+| `HOST` | Bind address; defaults to `127.0.0.1` |
+| `PORT` | HTTP port; defaults to `3000` |
+| `NODE_ENV` | Use `production` for production deployment behavior |
+| `SESSION_TTL_HOURS` | Session lifetime; defaults to 8 hours |
+| `COOKIE_SECURE` | Set `true` behind HTTPS; also enabled automatically when `NODE_ENV=production` |
+| `TRUST_PROXY` | Set `true` only when deployed behind a trusted reverse proxy |
+| `LOG_LEVEL` | Fastify log level; defaults to `info` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Enable Google sign-in; see below |
+| `PORTSIDE_QUOTE_URL`, `PORTSIDE_ADVISOR_URL`, `PORTSIDE_VIN_URL`, `PORTSIDE_TRACKING_URL`, `PORTSIDE_PROVIDER_TOKEN` | Optional provider adapters; see below |
+
+Never use real customer information or production credentials in local development. This phase has not been security-reviewed for production deployment.
+
+## API endpoints
+
+Errors use `{ "error": { "code": "...", "message": "..." } }`. Request validation failures return HTTP 400; unauthenticated requests return 401; authorization failures return 403; records not owned by the signed-in customer are returned as 404.
+
+| Method and path | Permission | Purpose |
 |---|---|---|
-| Importer | `importer` | `Importer@2026` |
-| Admin | `admin` | `Admin@2026` |
+| `POST /api/auth/register` | Public; rate limited | Create a customer account, sign in, and receive a one-time recovery code |
+| `POST /api/auth/reset-password` | Public; rate limited | Reset a password with email and recovery code; signs out all sessions |
+| `GET /api/auth/config` | Public | Whether Google sign-in is configured |
+| `GET /api/auth/google`, `GET /api/auth/google/callback` | Public; browser navigation | Google OpenID Connect sign-in |
+| `POST /api/auth/login` | Public; rate limited | Sign in with email and password |
+| `POST /api/auth/logout` | Public; clears current cookie/session | Sign out |
+| `GET /api/auth/me` | Signed in | Current account |
+| `POST /api/profile` | Signed in | Change name, password or recovery code |
+| `GET /api/catalog` | Signed in | Vehicle models and which providers are connected |
+| `GET`/`POST /api/conversations`, `GET`/`POST`/`DELETE /api/conversations/:id` | Owner | List (paginated), create, read, rename/complete and delete conversations |
+| `POST /api/chat` | Owner with `conversationId`; public without | Send a message; `requestId` makes retries safe |
+| `POST /api/services/:service` | Owner | Run `quote`, `advisor`, `vin` or `tracking` inside a conversation |
+| `GET`/`POST /api/quotes`, `DELETE /api/quotes/:id` | Owner | Saved estimates |
+| `GET /api/knowledge` | Signed in | Admin-approved answers |
+| `GET /api/admin` | Admin | Dashboard metrics, unanswered queue and knowledge, with date and search filters |
+| `POST /api/answers` | Admin | Answer an unanswered question |
+| `POST /api/admin/knowledge`, `DELETE /api/admin/knowledge/:id` | Admin | Create, edit or delete answers |
+| `DELETE /api/admin/questions/:id` | Admin | Dismiss an unanswered question |
+| `GET /api/vehicles` | Customer | List the signed-in customer’s vehicles |
+| `POST /api/vehicles` | Customer | Save a vehicle |
+| `GET /api/vehicles/:id` | Owning customer | Read one vehicle |
+| `PATCH /api/vehicles/:id` | Owning customer | Update one vehicle |
+| `GET /api/enquiries` | Customer | List the signed-in customer’s enquiries |
+| `POST /api/enquiries` | Customer | Submit an enquiry and receive a reference |
+| `GET /api/enquiries/:id` | Owning customer | Read one enquiry |
+| `GET /api/admin/enquiries` | Admin | List customer enquiries |
+| `PATCH /api/admin/enquiries/:id` | Admin | Update enquiry status/priority |
+| `GET /health` | Public | Basic process health check |
 
-`USER_PASSWORD` and `ADMIN_PASSWORD` set the seed passwords when accounts are **first created**. Later password changes persist; changing these environment variables does not overwrite existing accounts. Use strong initial passwords and HTTPS for a hosted installation. `NODE_ENV=production` adds Secure to session cookies, so production requires HTTPS.
+Legacy `/api/login`, `/api/logout`, and `/api/session` routes remain as compatibility aliases; the old demo username accounts are no longer provisioned. Non-GET requests from another origin are rejected.
 
-## Features
+## Database migrations
 
-- A public welcome page introduces the assistant, services and how to get started before account access.
-- Sign in, register, show/hide password, update name/password, and generate a private recovery code.
-- Google sign-in with server-side OpenID Connect, enabled when Google OAuth credentials are configured.
-- Password recovery using the username and a saved recovery code. Codes are shown once, downloadable, stored as salted hashes, and replaced after recovery. No email delivery service is configured or implied. Demo users can enable recovery in Account settings.
-- Server-owned chat intent matching and knowledge answers. Unknown questions are confirmed only after being saved for admin review.
-- Vehicle estimates and three-month timing comparisons with model, first registration, engine, fuel, reference value, freight/insurance and local fees. Choose **Other vehicle** for a custom model and value.
-- VIN and shipment API lookups, including shipment milestones, source labels and timestamps.
-- Private conversations with reopening, renaming, deletion and explicit completion. Completed chats remain readable; start a new chat to continue.
-- Saved estimates, expandable breakdowns and downloadable text exports. Deleting a conversation retains its saved estimates.
-- Paginated conversation and estimate libraries.
-- Admin question answers, dismissal, knowledge creation/editing/deletion, search, date filters, refresh and retry. Dashboard metrics include an explicit chat completion rate, not an inferred drop-off rate.
-- Mobile service shortcuts, keyboard focus management, live status messages, field validation, readable charts, and print styles.
-- Requests serialize in the chat UI; request IDs prevent a retry from duplicating a message, service result or metric. New chat and conversation switching ignore responses belonging to a previous view.
+Migration files live in `migrations/` and run in numeric order. Applied migration filenames are recorded in `schema_migrations`; each migration is run transactionally. Back up the database before applying new production migrations. `001_initial.sql` creates users, customer profiles, vehicles, enquiries, audit events, and hashed-token sessions. `002_assistant.sql` adds Google and recovery-code columns to users, plus conversations, messages, saved estimates, knowledge, unanswered questions, and query events.
 
 ## Google sign-in
 
-The welcome screen appears before login. Choose **Log in** or **Get started**, then use your username or **Sign in with Google**. Google sign-in is disabled with a clear availability message until the following server environment variables are configured:
+The welcome screen appears before login. Choose **Log in** or **Get started**, then use your email or **Sign in with Google**. Google sign-in is disabled with a clear availability message until the following server environment variables are configured:
+
+Set these in `.env` or the server environment:
 
 ```bash
-export GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-export GOOGLE_CLIENT_SECRET=your-client-secret
-export GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
-npm start
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
 ```
 
 In the [Google Cloud console](https://console.cloud.google.com/auth/overview), configure your app's OAuth consent screen and create an OAuth client with application type **Web application**. Add `http://localhost:3000/api/auth/google/callback` as an **Authorized redirect URI**, exactly matching `GOOGLE_REDIRECT_URI`. If using `http://127.0.0.1:3000`, add and configure that exact URI instead, and access Portside using the same host. For a deployed app, use `https://your-domain/api/auth/google/callback` and `NODE_ENV=production`. A testing-mode consent screen may require adding allowed test users. Follow Google's [web server OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred) for credential and consent-screen configuration.
 
 The client secret stays on the server. No Google SDK or tracking script is loaded by the welcome page. Selecting the Google button navigates to Google to authorize the basic `openid email profile` scopes. The server validates the callback, exchanges the code and verifies the signed identity token before issuing a Portside session. State, a short-lived browser-bound cookie, PKCE and nonce protect the authorization round trip. Cancellation and verification failures return to the login screen with safe messages; codes and error parameters are removed from the address bar.
 
-Google accounts are identified by Google's stable subject identifier, never automatically linked by matching an email or local username. New Google users receive the ordinary user role. Existing password and admin accounts keep their existing sign-in method. Google users can update their Portside display name; password and recovery settings remain managed through Google. No Google access or refresh tokens are stored in the data file. The OAuth browser cookie uses SameSite=Lax for the redirect; the normal Portside session remains HttpOnly with SameSite=Strict.
+Google accounts are identified by Google's stable subject identifier, never automatically linked by matching an email address. New Google users receive the customer role. Existing password and admin accounts keep their existing sign-in method. Google users can update their Portside display name; password and recovery settings remain managed through Google. No Google access or refresh tokens are stored in the database. The OAuth browser cookie uses SameSite=Lax for the redirect; the normal Portside session remains HttpOnly with SameSite=Strict.
 
 The flow follows Google's [OpenID Connect documentation](https://developers.google.com/identity/openid-connect/openid-connect). Real sign-in needs valid credentials and a consent screen from your Google Cloud project; automated tests use mocked Google responses and test signing keys.
-
-## Data and persistence
-
-Accounts, conversations, estimates, activity and knowledge persist in `data/portside.json`. Writes use a temporary file and atomic rename; the data directory and files use restrictive permissions. The directory is excluded from Git. Back it up to preserve account and conversation data.
-
-`PORTSIDE_DATA_FILE` selects another file; `:memory:` disables disk persistence for tests. Sessions remain in memory and expire after eight hours. Restarting the server signs users out but retains their saved work. Password changes and recovery revoke existing sessions.
-
-The JSON store is intended for a single Node process and modest data volumes. A shared database and session store are needed before running multiple server instances. Do not run simultaneous processes against the same data file.
 
 ## Service data and provider connections
 
@@ -84,7 +167,7 @@ PORTSIDE_TRACKING_URL=https://your-adapter.example/tracking
 PORTSIDE_PROVIDER_TOKEN=your-private-server-token
 ```
 
-These are environment variables, not an automatically loaded `.env` file. Export them in your shell or configure them through your hosting environment. Provider secrets stay on the server. Requests are JSON POSTs with a 12-second timeout and an optional `Authorization: Bearer ...` header. Each URL must implement the contract below; an arbitrary third-party API generally needs an adapter. Provider accounts, approved data sources and credentials must be supplied to enable real data.
+Set them in `.env` or your hosting environment. Provider secrets stay on the server. Requests are JSON POSTs with a 12-second timeout and an optional `Authorization: Bearer ...` header. Each URL must implement the contract below; an arbitrary third-party API generally needs an adapter. Provider accounts, approved data sources and credentials must be supplied to enable real data.
 
 Vehicle request:
 
@@ -111,41 +194,16 @@ Response:
 
 `rows` contains at most 40 label/value pairs; values are strings or numbers. Numeric values are displayed as Ksh, so use strings for nonmonetary quantities. `total` is required and must be a nonnegative number for quote/advisor responses. For timing, return comparison rows for now, +1 and +2 months; `total` represents the current estimate. VIN/tracking omit `total`. The server sets `source: "provider"`, a retrieval timestamp, and the validated input. Provider estimates can be saved and exported like demo estimates.
 
-## API overview
+## Troubleshooting
 
-Authentication is cookie based. Account login, registration, recovery and the Google configuration/start/callback routes are public; application data requires a session. Mutating requests reject mismatched Origin headers. Admin permissions and ownership checks are enforced server side.
+- **Password authentication failed**: Ensure the `portside_user` role password matches the local default (`portside_local_dev`) or the URL in `.env`.
+- **Connection refused**: Ensure the PostgreSQL Windows service is running and the port (usually 5432) is correct.
+- **Password authentication failed**: Check the role password in `DATABASE_URL`; URL-encode special characters in the password.
+- **Database does not exist**: Create `portside` and assign it to `portside_user` using the SQL setup above.
+- **`psql` is not recognized**: Re-run the PostgreSQL installer with Command Line Tools selected, then reopen VS Code so PATH refreshes.
+- **PowerShell blocks npm**: Use `npm.cmd` rather than changing the machine’s execution policy.
+- **Port 3000 is busy**: Set another `PORT` in `.env`, then restart the server.
 
-| Route | Purpose |
-|---|---|
-| `POST /api/login`, `/api/register`, `/api/reset-password`, `/api/logout` | Account access |
-| `GET /api/auth/config` | Public Google sign-in availability; no secrets |
-| `GET /api/auth/google`, `/api/auth/google/callback` | Start Google authorization / handle callback |
-| `GET /api/session`, `POST /api/profile` | Session and account settings |
-| `GET /api/catalog` | Models, current month and provider availability |
-| `GET/POST /api/conversations` | Paginated list / create |
-| `GET/POST/DELETE /api/conversations/:id` | Open / rename or complete / delete |
-| `POST /api/chat` | `{conversationId, requestId, message}` → stored conversation and reply |
-| `POST /api/services/:service` | `{conversationId, requestId, input}` → stored result; service is quote/advisor/vin/tracking |
-| `GET/POST /api/quotes` | Paginated saved estimates / save `{conversationId, messageId}` |
-| `DELETE /api/quotes/:id` | Remove own saved estimate |
-| `GET /api/admin` | Metrics and paginated queue/knowledge; `from`, `to`, `search`, `queuePage`, `knowledgePage` filters |
-| `POST /api/answers` | Answer a queued question using `{id, answer}` |
-| `POST /api/admin/knowledge` | Create/update `{id?, question, answer}` |
-| `DELETE /api/admin/knowledge/:id`, `/api/admin/questions/:id` | Delete answer / dismiss question |
+## Current limits
 
-`GET /api/knowledge` and `POST /api/activity` remain compatible with the original prototype. `/api/chat` without a conversation ID retains the original basic rule-based response for compatibility; the frontend uses the persisted conversation contract.
-
-Date filters use Africa/Nairobi calendar dates, inclusive at both ends. Activity counts include chat messages and submitted service forms. Completion rate uses nonempty conversations created in the chosen date range. Search filters questions and knowledge; date filters apply to activity and unanswered questions. Saved knowledge is not date-filtered.
-
-## Checks
-
-```bash
-npm install
-npm run check
-npm test
-npm run test:e2e
-```
-
-Browser tests use `/usr/bin/google-chrome` when available. Set `PORTSIDE_CHROME_PATH` for another Chrome executable, or run `npx playwright install chromium` to use Playwright's browser. Tests start an isolated in-memory server on port 3107; do not run another service there. Backend tests use memory or a temporary directory and do not alter application data.
-
-The checks cover calculations/validation, provider failures, persistence across processes, account recovery, ownership/roles, idempotent retries, saved estimates, admin knowledge CRUD, browser registration, estimate export, conversation reopening, delayed chat responses, mobile layout and tracking.
+Password recovery uses recovery codes; no email delivery service is configured. There is no production tax calculator, live shipping or vehicle-history provider, payment processing, document upload, email/SMS notification, or AI web search. The existing quote, timing, tracking, and VIN demonstrations remain illustrative only.
