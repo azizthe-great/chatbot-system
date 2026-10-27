@@ -1,7 +1,7 @@
 'use strict';
 const { buildApp } = require('../../server');
 const { createUser } = require('../../src/services/auth');
-const { TestDatabase } = require('./database');
+const { LocalDatabase } = require('../../src/database/local');
 
 const accounts = {
   customer: { name: 'Customer One', email: 'one@example.test', password: 'Customer-password-1!', role: 'customer' },
@@ -11,7 +11,7 @@ const accounts = {
 
 // Builds the app on a fresh migrated database seeded with two customers and an admin.
 async function setup(t, { db, config } = {}) {
-  db = db || await TestDatabase.create();
+  db = db || await LocalDatabase.create();
   const users = {};
   if (!(await db.query('SELECT 1 FROM users LIMIT 1')).rowCount) for (const [key, account] of Object.entries(accounts)) users[key] = await createUser(db, account);
   const app = buildApp({ db, config: { logLevel: 'silent', authRateLimitMax: 1000, ...config } });

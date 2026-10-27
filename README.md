@@ -1,77 +1,56 @@
 # Portside — Kenya vehicle import assistant
 
-Portside is a Node.js web application with a plain HTML/CSS/JavaScript frontend. Accounts, sessions, conversations, saved estimates, the admin knowledge base, customer vehicles and enquiries, and audit events are stored in PostgreSQL. Customers can register, sign in with Google, and recover their password with a one-time recovery code. Import-cost, shipment and VIN results use clearly labelled demo data unless a provider adapter is configured.
+Portside is a Node.js web application with a plain HTML/CSS/JavaScript frontend. Accounts, sessions, conversations, saved estimates, the admin knowledge base, customer vehicles and enquiries, and audit events are stored in a database. Customers can register, sign in with Google, and recover their password with a one-time recovery code. Import-cost, shipment and VIN results use clearly labelled demo data unless a provider adapter is configured.
 
 ## Requirements
 
-- Node.js 20 or newer (Fastify 5 requires Node 20+; Node 22 LTS or newer is recommended).
-- PostgreSQL 15 or newer, running locally or at an approved database host.
-- VS Code is optional.
+- Node.js 20 or newer.
+- Nothing else. The database is built in: Portside runs PostgreSQL inside the Node process ([PGlite](https://pglite.dev/)) and stores it in `data/portside-db`. A separate PostgreSQL server is optional.
 
-## Windows and VS Code setup
+## Quick start
 
-1. Install Node.js from [nodejs.org](https://nodejs.org/) and PostgreSQL from [postgresql.org/download/windows](https://www.postgresql.org/download/windows/). In the PostgreSQL installer, include **Command Line Tools**. Remember the password you set for the local PostgreSQL superuser.
-2. Open this project folder in VS Code. Open **Terminal → New Terminal** and confirm `node --version` is at least `v20` and `psql --version` works. If PowerShell blocks `npm.ps1`, use `npm.cmd` in the commands below.
-3. Install the project dependencies:
+Run these in the project folder (on Windows PowerShell, use `npm.cmd` if `npm` is blocked):
 
-   ```powershell
-   npm.cmd install
-   ```
+```bash
+npm install
+npm run users:create-admin   # prompts for name, email and a password of at least 12 characters
+npm start                    # open http://localhost:3000
+```
 
-4. Create an application database role and database. Open pgAdmin, connect to the local PostgreSQL server using the installer password, and open **Query Tool**. Run these SQL statements. The development role password is local-only; change it and set the same value in `.env` if you prefer.
+The database and its tables are created automatically the first time. Customers can create their own accounts on the welcome page; you can also add them with `npm run users:create-customer`.
+
+Only one process can open the local database at a time, so stop the server (Ctrl+C) before running `users:create-admin` or `users:create-customer`. To start again from an empty database, stop the server and delete the `data/portside-db` folder. The `data/` folder is excluded from git.
+
+## Tests
+
+```bash
+npm test                      # API tests on a fresh in-memory database
+npx playwright install chromium
+npm run test:e2e              # browser tests with two seeded accounts
+```
+
+Tests never touch `data/portside-db` or a configured `DATABASE_URL`.
+
+## Using a PostgreSQL server instead (optional)
+
+For a shared or production deployment, use PostgreSQL 15 or newer:
+
+1. Create a role and database, for example:
 
    ```sql
-   CREATE ROLE portside_user LOGIN PASSWORD 'portside_local_dev';
+   CREATE ROLE portside_user LOGIN PASSWORD 'choose-a-password';
    CREATE DATABASE portside OWNER portside_user;
    ```
 
-   Exit `psql` with `\q`.
-5. Portside defaults to the local PostgreSQL URL shown in `.env.example`, so you can start without creating `.env`. If you want a different role password, copy the file and edit the connection string in PowerShell:
-
-   ```powershell
-   Copy-Item .env.example .env
-   notepad .env
-   ```
-
-   Set `DATABASE_URL` to match your local role password. Keep `.env` private; `.gitignore` excludes it.
-6. Apply the versioned schema migrations:
-
-   ```powershell
-   npm.cmd run db:migrate
-   ```
-
-7. Create your initial local administrator. The command prompts for name, email, password, and confirmation; the password entry is hidden and must be at least 12 characters. It does not create a default account.
-
-   ```powershell
-   npm.cmd run users:create-admin
-   ```
-
-   Customers can create their own accounts on the welcome page. You can also create them with `npm.cmd run users:create-customer`.
-8. Start Portside and open `http://localhost:3000`:
-
-   ```powershell
-   npm.cmd start
-   ```
-
-9. Run automated tests:
-
-   ```powershell
-   npm.cmd test
-   ```
-
-10. Run the browser tests (optional). They start the app on PGlite with two seeded accounts and need a Chromium browser (`npx playwright install chromium`):
-
-   ```powershell
-   npm.cmd run test:e2e
-   ```
-
-The tests run the real migrations and queries against [PGlite](https://pglite.dev/), an in-process PostgreSQL build, so they need no database server and never touch the database in `DATABASE_URL`. A PostgreSQL server is still required to run the application, migrations, and user creation command.
+2. Copy `.env.example` to `.env` and set `DATABASE_URL=postgresql://portside_user:choose-a-password@localhost:5432/portside`. URL-encode special characters in the password. Keep `.env` private; `.gitignore` excludes it.
+3. Apply migrations with `npm run db:migrate`, then create users and start the server as above. With `DATABASE_URL` set, migrations are not run automatically.
 
 ## Environment settings
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string; defaults to the local `portside` database |
+| `DATABASE_URL` | PostgreSQL connection string; leave unset to use the built-in local database |
+| `PORTSIDE_DATA_DIR` | Folder for the built-in local database; defaults to `data/portside-db` |
 | `HOST` | Bind address; defaults to `127.0.0.1` |
 | `PORT` | HTTP port; defaults to `3000` |
 | `NODE_ENV` | Use `production` for production deployment behavior |
@@ -196,13 +175,16 @@ Response:
 
 ## Troubleshooting
 
-- **Password authentication failed**: Ensure the `portside_user` role password matches the local default (`portside_local_dev`) or the URL in `.env`.
-- **Connection refused**: Ensure the PostgreSQL Windows service is running and the port (usually 5432) is correct.
-- **Password authentication failed**: Check the role password in `DATABASE_URL`; URL-encode special characters in the password.
-- **Database does not exist**: Create `portside` and assign it to `portside_user` using the SQL setup above.
-- **`psql` is not recognized**: Re-run the PostgreSQL installer with Command Line Tools selected, then reopen VS Code so PATH refreshes.
+- **"The local database is in use by another Portside process"**: Stop the running server with Ctrl+C before running `users:create-admin` or starting a second server.
+- **Database connection error on start**: You have `DATABASE_URL` set in `.env`. Comment it out to use the built-in local database, or see the PostgreSQL section above.
 - **PowerShell blocks npm**: Use `npm.cmd` rather than changing the machine’s execution policy.
 - **Port 3000 is busy**: Set another `PORT` in `.env`, then restart the server.
+
+PostgreSQL server only:
+
+- **Connection refused**: Ensure the PostgreSQL service is running and the port (usually 5432) is correct.
+- **Password authentication failed**: Check the role password in `DATABASE_URL`; URL-encode special characters in the password.
+- **Database does not exist**: Create the database using the SQL above.
 
 ## Current limits
 

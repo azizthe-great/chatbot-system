@@ -5,7 +5,7 @@ const cookie = require('@fastify/cookie');
 const rateLimit = require('@fastify/rate-limit');
 const fastifyStatic = require('@fastify/static');
 const config = require('./src/config');
-const { getPool } = require('./src/database/pool');
+const { getPool, openDatabase, closePool } = require('./src/database/pool');
 const auth = require('./src/services/auth');
 const google = require('./src/services/google-auth');
 const { errorPayload } = require('./src/http');
@@ -84,15 +84,13 @@ function buildApp(options = {}) {
 }
 
 if (require.main === module) {
-  try {
-    const app = buildApp();
-    app.listen({ port: config.port, host: config.host }).then(() => {
-      app.log.info(`Portside is running at http://${config.host}:${config.port}`);
-    }).catch((error) => { app.log.error({ errorCode: error.code || error.name }, 'Server could not start'); process.exitCode = 1; });
-  } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
-  }
+  openDatabase().then(async (db) => {
+    const app = buildApp({ db });
+    await app.listen({ port: config.port, host: config.host });
+    app.log.info(`Portside is running at http://${config.host}:${config.port} using ${config.databaseUrl ? 'PostgreSQL' : `the local database in ${config.dataDir}`}`);
+    // Close cleanly on Ctrl+C so the local database is flushed and its lock released.
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { app.close().then(closePool).finally(() => process.exit(0)); });
+  }).catch((error) => { console.error(`Server could not start: ${error.message}`); process.exitCode = 1; });
 }
 
 module.exports = { buildApp };
