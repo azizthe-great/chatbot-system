@@ -21,5 +21,7 @@ module.exports = {
   sessionTtlHours: Math.max(1, Number(process.env.SESSION_TTL_HOURS) || 8),
   cookieSecure: process.env.COOKIE_SECURE === 'true' || (process.env.NODE_ENV || '').toLowerCase() === 'production',
   trustProxy: process.env.TRUST_PROXY === 'true',
-  logLevel: process.env.LOG_LEVEL || 'info'
+  logLevel: process.env.LOG_LEVEL || 'info',
+  // The first administrator, created on start when no account with this email exists.
+  admin: { name: process.env.ADMIN_NAME || 'Administrator', email: process.env.ADMIN_EMAIL || '', password: process.env.ADMIN_PASSWORD || '' }
 };

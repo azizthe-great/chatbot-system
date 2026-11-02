@@ -8,6 +8,7 @@ const config = require('./src/config');
 const { getPool, openDatabase, closePool } = require('./src/database/pool');
 const auth = require('./src/services/auth');
 const google = require('./src/services/google-auth');
+const { ensureAdmin } = require('./src/services/bootstrap');
 const { errorPayload } = require('./src/http');
 const { registerAuthRoutes, SESSION_COOKIE } = require('./src/routes/auth');
 const { registerRecordRoutes } = require('./src/routes/records');
@@ -85,9 +86,13 @@ function buildApp(options = {}) {
 
 if (require.main === module) {
   openDatabase().then(async (db) => {
+    const admin = await ensureAdmin(db, config.admin);
     const app = buildApp({ db });
     await app.listen({ port: config.port, host: config.host });
     app.log.info(`Portside is running at http://${config.host}:${config.port} using ${config.databaseUrl ? 'PostgreSQL' : `the local database in ${config.dataDir}`}`);
+    if (admin.status === 'created') app.log.info(`Created the administrator account ${admin.email}. Sign in with ADMIN_PASSWORD, then change it in Account settings.`);
+    if (admin.status === 'customer') app.log.warn(`${admin.email} is a customer account, so it was not made an administrator. Use a different ADMIN_EMAIL.`);
+    if (admin.status === 'missing') app.log.warn('No administrator account exists. Set ADMIN_EMAIL and ADMIN_PASSWORD in .env and restart.');
     // Close cleanly on Ctrl+C so the local database is flushed and its lock released.
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { app.close().then(closePool).finally(() => process.exit(0)); });
   }).catch((error) => { console.error(`Server could not start: ${error.message}`); process.exitCode = 1; });

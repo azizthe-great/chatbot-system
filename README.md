@@ -9,17 +9,32 @@ Portside is a Node.js web application with a plain HTML/CSS/JavaScript frontend.
 
 ## Quick start
 
-Run these in the project folder (on Windows PowerShell, use `npm.cmd` if `npm` is blocked):
+1. In the project folder, copy the settings file:
 
-```bash
-npm install
-npm run users:create-admin   # prompts for name, email and a password of at least 12 characters
-npm start                    # open http://localhost:3000
-```
+   ```bash
+   cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
+   ```
 
-The database and its tables are created automatically the first time. Customers can create their own accounts on the welcome page; you can also add them with `npm run users:create-customer`.
+2. Open `.env` and fill in the administrator account, with a password of at least 12 characters:
 
-Only one process can open the local database at a time, so stop the server (Ctrl+C) before running `users:create-admin` or `users:create-customer`. To start again from an empty database, stop the server and delete the `data/portside-db` folder. The `data/` folder is excluded from git.
+   ```
+   ADMIN_NAME=Your name
+   ADMIN_EMAIL=you@example.com
+   ADMIN_PASSWORD=choose-a-long-password
+   ```
+
+3. Install and start (on Windows PowerShell, use `npm.cmd` if `npm` is blocked):
+
+   ```bash
+   npm install
+   npm start
+   ```
+
+4. Open http://localhost:3000 and sign in with that email and password. Then change the password in **Account**; the one in `.env` is only used to create the account the first time.
+
+The database and the administrator are created automatically on the first start. Customers create their own accounts on the welcome page. Stop the server with Ctrl+C.
+
+To start again from an empty database, stop the server and delete the `data/portside-db` folder. The `data/` folder is excluded from git. The `npm run users:create-admin` and `users:create-customer` commands still work for adding more accounts; stop the server first, because only one process can open the local database at a time.
 
 ## Tests
 
@@ -43,7 +58,7 @@ For a shared or production deployment, use PostgreSQL 15 or newer:
    ```
 
 2. Copy `.env.example` to `.env` and set `DATABASE_URL=postgresql://portside_user:choose-a-password@localhost:5432/portside`. URL-encode special characters in the password. Keep `.env` private; `.gitignore` excludes it.
-3. Apply migrations with `npm run db:migrate`, then create users and start the server as above. With `DATABASE_URL` set, migrations are not run automatically.
+3. Apply migrations with `npm run db:migrate`, then start the server as above. With `DATABASE_URL` set, migrations are not run automatically.
 
 ## Environment settings
 
@@ -51,6 +66,7 @@ For a shared or production deployment, use PostgreSQL 15 or newer:
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string; leave unset to use the built-in local database |
 | `PORTSIDE_DATA_DIR` | Folder for the built-in local database; defaults to `data/portside-db` |
+| `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Administrator account created on start if it does not exist yet |
 | `HOST` | Bind address; defaults to `127.0.0.1` |
 | `PORT` | HTTP port; defaults to `3000` |
 | `NODE_ENV` | Use `production` for production deployment behavior |
@@ -175,6 +191,7 @@ Response:
 
 ## Troubleshooting
 
+- **"No administrator account exists" in the server log**: Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` and restart.
 - **"The local database is in use by another Portside process"**: Stop the running server with Ctrl+C before running `users:create-admin` or starting a second server.
 - **Database connection error on start**: You have `DATABASE_URL` set in `.env`. Comment it out to use the built-in local database, or see the PostgreSQL section above.
 - **PowerShell blocks npm**: Use `npm.cmd` rather than changing the machine’s execution policy.
