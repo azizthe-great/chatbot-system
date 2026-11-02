@@ -8,6 +8,7 @@
     "db:migrate": "node scripts/migrate.js",
     "users:create-admin": "node scripts/create-user.js admin",
     "users:create-customer": "node scripts/create-user.js customer",
+    "users:reset-admin-password": "node scripts/reset-admin-password.js",
     "test": "node --test"
   },
   "engines": {

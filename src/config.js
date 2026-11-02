@@ -20,5 +20,6 @@ module.exports = {
   sessionTtlHours: Math.max(1, Number(process.env.SESSION_TTL_HOURS) || 8),
   cookieSecure: process.env.COOKIE_SECURE === 'true' || (process.env.NODE_ENV || '').toLowerCase() === 'production',
   trustProxy: process.env.TRUST_PROXY === 'true',
+  vehicleLookupTimeoutMs: Math.min(15000, Math.max(500, Number(process.env.VEHICLE_LOOKUP_TIMEOUT_MS) || 5000)),
   logLevel: process.env.LOG_LEVEL || 'info'
 };

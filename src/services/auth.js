@@ -25,6 +25,24 @@ async function createUser(db, { name, email, password, role = 'customer' }) {
     throw error;
   } finally { if (client !== db) client.release(); }
 }
+async function resetAdminPassword(db, { identifier, password }) {
+  if (typeof identifier !== 'string' || !identifier.trim()) throw new Error('An administrator email or account ID is required.');
+  if (typeof password !== 'string' || password.length < 12) throw new Error('Password must be at least 12 characters.');
+  const target = identifier.trim();
+  const found = await db.query(
+    `SELECT id,email FROM users
+      WHERE role='admin' AND (id::text=$1 OR lower(email)=$2)`,
+    [target, target.toLowerCase()]
+  );
+  if (found.rowCount !== 1) throw new Error(found.rowCount ? 'Administrator identifier matched more than one account.' : 'No administrator account matched that email or account ID.');
+  const passwordHash = await hashPassword(password);
+  const updated = await db.query(
+    `UPDATE users SET password_hash=$1 WHERE id=$2 AND role='admin' RETURNING id,email,role`,
+    [passwordHash, found.rows[0].id]
+  );
+  if (updated.rowCount !== 1) throw new Error('Administrator account changed during reset; no account was updated.');
+  return updated.rows[0];
+}
 async function authenticate(db, email, password) {
   const result = await db.query('SELECT id,name,email,password_hash,role,status FROM users WHERE lower(email)=$1', [email.trim().toLowerCase()]);
   const user = result.rows[0];
@@ -54,4 +72,4 @@ async function deleteSession(db, token) {
   if (token && token.length <= 128) await db.query('DELETE FROM sessions WHERE token_hash=$1', [hashToken(token)]);
 }
 
-module.exports = { createUser, authenticate, createSession, findSession, deleteSession, hashToken };
+module.exports = { createUser, resetAdminPassword, authenticate, createSession, findSession, deleteSession, hashToken };

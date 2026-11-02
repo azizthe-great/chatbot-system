@@ -27,7 +27,10 @@ class TestDatabase {
       return session && user && session.expires_at > new Date() && user.status === 'active' ? { rows: [{ id: user.id, name: user.name, email: user.email, role: user.role, status: user.status, expires_at: session.expires_at }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     if (q.startsWith('DELETE FROM sessions')) { const n = this.sessions.delete(values[0]); return { rows: [], rowCount: Number(n) }; }
-    if (q.startsWith('INSERT INTO audit_events')) { this.audits.push(values); return { rows: [], rowCount: 1 }; }
+    if (q.startsWith('INSERT INTO audit_events')) {
+      this.audits.push({ id: values[0], actor_id: values[1], action: values[2], record_type: values[3], record_id: values[4], metadata: JSON.parse(values[5]), created_at: new Date() });
+      return { rows: [], rowCount: 1 };
+    }
     if (q.startsWith('INSERT INTO vehicles')) {
       const [id, customer_id, make, model, year, engine_capacity_cc, fuel_type, origin_country, vin] = values;
       if (vin && [...this.vehicles.values()].some((v) => v.vin?.toUpperCase() === vin.toUpperCase())) { const err = new Error('unique'); err.code = '23505'; throw err; }
@@ -59,6 +62,21 @@ class TestDatabase {
     }
     if (q.startsWith('SELECT e.id,e.reference,e.customer_id AS "customerId"')) {
       const rows = [...this.enquiries.values()].map((e) => ({ ...e, customerId: e.customer_id, customerName: this.users.get(e.customer_id).name, customerEmail: this.users.get(e.customer_id).email })); return { rows, rowCount: rows.length };
+    }
+    if (q.startsWith('SELECT u.id,u.name,u.email,u.status,u.created_at AS "createdAt"')) {
+      const rows = [...this.users.values()].filter((user) => user.role === 'customer').map((user) => ({
+        id: user.id, name: user.name, email: user.email, status: user.status, createdAt: user.created_at,
+        lastLoginAt: this.audits.filter((audit) => audit.actor_id === user.id && audit.action === 'auth.login').map((audit) => audit.created_at).sort((a, b) => b - a)[0] || null
+      })).sort((a, b) => b.createdAt - a.createdAt);
+      return { rows, rowCount: rows.length };
+    }
+    if (q.startsWith('SELECT a.action,a.created_at AS "createdAt"')) {
+      const rows = this.audits.filter((audit) => ['auth.login', 'auth.register'].includes(audit.action) && this.users.has(audit.actor_id))
+        .map((audit) => {
+          const user = this.users.get(audit.actor_id);
+          return { action: audit.action, createdAt: audit.created_at, userId: user.id, userName: user.name, userEmail: user.email };
+        }).sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
+      return { rows, rowCount: rows.length };
     }
     if (q.startsWith('UPDATE enquiries SET')) {
       const id = values[values.length - 1]; const enquiry = this.enquiries.get(id); if (!enquiry) return { rows: [], rowCount: 0 };
@@ -92,6 +110,7 @@ test('account auth, roles, ownership, validation, admin updates and session inva
   const adminLogin = await login('admin@example.test', 'Admin-password-1!');
   assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me', headers: authHeaders(one.cookie) })).json().user.role, 'customer');
   assert.equal((await app.inject({ method: 'GET', url: '/api/admin/enquiries', headers: authHeaders(one.cookie) })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/admin/accounts', headers: authHeaders(one.cookie) })).statusCode, 403);
   assert.equal((await app.inject({ method: 'POST', url: '/api/vehicles', headers: authHeaders(one.cookie), payload: { model: 'Harrier' } })).statusCode, 400);
   const createdVehicle = await app.inject({ method: 'POST', url: '/api/vehicles', headers: authHeaders(one.cookie), payload: { make: 'Toyota', model: 'Harrier', year: 2019, vin: 'JTM00000000000001' } });
   assert.equal(createdVehicle.statusCode, 201); const vehicleId = createdVehicle.json().vehicle.id;
@@ -104,6 +123,14 @@ test('account auth, roles, ownership, validation, admin updates and session inva
   assert.equal((await app.inject({ method: 'POST', url: '/api/enquiries', headers: authHeaders(two.cookie), payload: { category: 'Help', description: 'Not mine', vehicleId } })).statusCode, 404);
   const adminList = await app.inject({ method: 'GET', url: '/api/admin/enquiries', headers: authHeaders(adminLogin.cookie) });
   assert.equal(adminList.statusCode, 200); assert.equal(adminList.json().enquiries.length, 1);
+  const registered = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { name: 'New Customer', email: 'new@example.test', password: 'New-customer-password-1!' } });
+  assert.equal(registered.statusCode, 201);
+  const accounts = await app.inject({ method: 'GET', url: '/api/admin/accounts', headers: authHeaders(adminLogin.cookie) });
+  assert.equal(accounts.statusCode, 200);
+  assert.equal(accounts.json().accounts.length, 3);
+  assert.ok(Number.isFinite(Date.parse(accounts.json().accounts.find((account) => account.id === customer.id).lastLoginAt)));
+  assert.ok(accounts.json().activity.some((event) => event.action === 'auth.login' && event.userEmail === 'one@example.test'));
+  assert.ok(accounts.json().activity.some((event) => event.action === 'auth.register' && event.userEmail === 'new@example.test'));
   assert.equal((await app.inject({ method: 'PATCH', url: `/api/admin/enquiries/${enquiry.id}`, headers: authHeaders(adminLogin.cookie), payload: { status: 'resolved', priority: 'high' } })).statusCode, 200);
   assert.equal((await app.inject({ method: 'POST', url: '/api/auth/logout', headers: authHeaders(one.cookie) })).statusCode, 200);
   assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me', headers: authHeaders(one.cookie) })).statusCode, 401);
