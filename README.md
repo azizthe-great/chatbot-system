@@ -4,37 +4,121 @@ Portside is a Node.js web application with a plain HTML/CSS/JavaScript frontend.
 
 ## Requirements
 
-- Node.js 20 or newer.
-- Nothing else. The database is built in: Portside runs PostgreSQL inside the Node process ([PGlite](https://pglite.dev/)) and stores it in `data/portside-db`. A separate PostgreSQL server is optional.
+- **Node.js 20 or newer** (the LTS release from [nodejs.org](https://nodejs.org/) is fine). npm comes with it.
+- **Git**, to download the project (or download it as a ZIP from GitHub instead).
+- Nothing else. The database is built in: Portside runs PostgreSQL inside the Node process ([PGlite](https://pglite.dev/)) and stores it in `data/portside-db`. You do **not** need to install PostgreSQL. A separate PostgreSQL server is optional.
 
-## Quick start
+## Running on Windows (step by step)
 
-1. In the project folder, copy the settings file:
+These steps use **PowerShell**. Open it from the Start menu by typing "PowerShell". Commands below are typed at the PowerShell prompt and run with Enter.
+
+### 1. Install Node.js and Git (one time)
+
+1. Download the **LTS** Windows installer (`.msi`) from [nodejs.org](https://nodejs.org/) and run it, keeping the default options. You do not need the optional "Tools for native modules".
+2. Download Git from [git-scm.com/download/win](https://git-scm.com/download/win) and run the installer with the default options. (Skip this if you will download the ZIP instead.)
+3. **Close PowerShell and open a new window**, so it picks up the new programs, then check them:
+
+   ```powershell
+   node -v      # should print v20.x or newer
+   npm.cmd -v
+   git --version
+   ```
+
+   You can also install both with winget: `winget install OpenJS.NodeJS.LTS Git.Git`.
+
+### 2. Download the project
+
+```powershell
+cd $HOME\Documents
+git clone https://github.com/azizthe-great/chatbot-system.git
+cd chatbot-system
+git checkout feature/import-assistant   # until this branch is merged into main
+```
+
+Without Git: on the GitHub page choose **Code → Download ZIP**, right-click the ZIP and choose **Extract All**, then `cd` into the extracted folder in PowerShell. Choose a folder that is **not** synced by OneDrive if you can, because OneDrive can lock the database files while the server is running.
+
+### 3. Create the settings file
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+In Notepad, fill in the administrator account and save. The password must be at least 12 characters:
+
+```
+ADMIN_NAME=Your name
+ADMIN_EMAIL=you@example.com
+ADMIN_PASSWORD=choose-a-long-password
+```
+
+Leave `DATABASE_URL` commented out (starting with `#`) to use the built-in database. Make sure Notepad saves the file as `.env`, not `.env.txt`. Check with `Get-ChildItem -Force .env*`; if you see `.env.txt`, rename it with `Rename-Item .env.txt .env`.
+
+### 4. Install and start
+
+```powershell
+npm.cmd install
+npm.cmd start
+```
+
+Use `npm.cmd` rather than `npm`: PowerShell's default security policy blocks the `npm.ps1` script with an error like *"running scripts is disabled on this system"*. `npm.cmd` does the same thing without changing any system settings. (In the older **Command Prompt**, `cmd.exe`, plain `npm` works.)
+
+When the server is ready, the window shows:
+
+```
+Portside is running at http://127.0.0.1:3000 using the local database in C:\...\chatbot-system\data\portside-db
+```
+
+The first time, Windows Defender Firewall may ask whether to allow Node.js. Portside only listens on this computer (`127.0.0.1`), so you can choose **Cancel**; it will still work in your own browser.
+
+### 5. Sign in
+
+1. Open http://localhost:3000 in your browser.
+2. **Admin:** choose **Log in** and use the `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`. Then change the password in **Account**; the one in `.env` is only used to create the account the first time.
+3. **Importer (customer):** sign out, choose **Get started**, and register with any name, email and a password of at least 12 characters. Copy the **recovery code** shown after registering; it is the only way to reset that password.
+
+### 6. Stop and start again
+
+- Stop the server: click in the PowerShell window and press **Ctrl+C** (answer `Y` if asked "Terminate batch job?").
+- Start it again later: open PowerShell, `cd $HOME\Documents\chatbot-system`, then `npm.cmd start`. You do not need to run `npm.cmd install` again unless `package.json` changes (for example after `git pull`).
+- Your accounts and data are kept in `data\portside-db` between restarts.
+
+### 7. Update to the latest version
+
+```powershell
+git pull
+npm.cmd install
+npm.cmd start
+```
+
+## Running on macOS or Linux
+
+1. Install Node.js 20 or newer (from [nodejs.org](https://nodejs.org/), `brew install node`, or your distribution's package manager / [nvm](https://github.com/nvm-sh/nvm)), and Git.
+2. Download the project and create the settings file:
 
    ```bash
-   cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
+   git clone https://github.com/azizthe-great/chatbot-system.git
+   cd chatbot-system
+   git checkout feature/import-assistant   # until this branch is merged into main
+   cp .env.example .env
    ```
 
-2. Open `.env` and fill in the administrator account, with a password of at least 12 characters:
-
-   ```
-   ADMIN_NAME=Your name
-   ADMIN_EMAIL=you@example.com
-   ADMIN_PASSWORD=choose-a-long-password
-   ```
-
-3. Install and start (on Windows PowerShell, use `npm.cmd` if `npm` is blocked):
+3. Edit `.env` and set `ADMIN_NAME`, `ADMIN_EMAIL` and `ADMIN_PASSWORD` (at least 12 characters) as described in the Windows steps.
+4. Install and start:
 
    ```bash
    npm install
    npm start
    ```
 
-4. Open http://localhost:3000 and sign in with that email and password. Then change the password in **Account**; the one in `.env` is only used to create the account the first time.
+5. Open http://localhost:3000 and sign in as described in step 5 above. Stop the server with Ctrl+C.
 
-The database and the administrator are created automatically on the first start. Customers create their own accounts on the welcome page. Stop the server with Ctrl+C.
+## Accounts and data
 
-To start again from an empty database, stop the server and delete the `data/portside-db` folder. The `data/` folder is excluded from git. The `npm run users:create-admin` and `users:create-customer` commands still work for adding more accounts; stop the server first, because only one process can open the local database at a time.
+- The database and the administrator account are created automatically on the first start.
+- Customers (importers) create their own accounts with **Get started** on the welcome page.
+- To add more accounts from the terminal, **stop the server first** (only one process can open the local database at a time), then run `npm run users:create-admin` or `npm run users:create-customer` (on Windows PowerShell: `npm.cmd run users:create-admin`). It asks for a name, email and hidden password.
+- To start again from an empty database, stop the server and delete the `data/portside-db` folder (PowerShell: `Remove-Item -Recurse -Force data\portside-db`). The `data/` folder is excluded from git, so your local accounts are never pushed.
 
 ## Tests
 
@@ -43,6 +127,8 @@ npm test                      # API tests on a fresh in-memory database
 npx playwright install chromium
 npm run test:e2e              # browser tests with two seeded accounts
 ```
+
+On Windows PowerShell use `npm.cmd test`, `npx.cmd playwright install chromium` and `npm.cmd run test:e2e`.
 
 Tests never touch `data/portside-db` or a configured `DATABASE_URL`.
 
@@ -194,8 +280,12 @@ Response:
 - **"No administrator account exists" in the server log**: Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` and restart.
 - **"The local database is in use by another Portside process"**: Stop the running server with Ctrl+C before running `users:create-admin` or starting a second server.
 - **Database connection error on start**: You have `DATABASE_URL` set in `.env`. Comment it out to use the built-in local database, or see the PostgreSQL section above.
-- **PowerShell blocks npm**: Use `npm.cmd` rather than changing the machine’s execution policy.
-- **Port 3000 is busy**: Set another `PORT` in `.env`, then restart the server.
+- **PowerShell blocks npm** (*"running scripts is disabled on this system"*): Use `npm.cmd` (and `npx.cmd`) rather than changing the machine’s execution policy.
+- **`node` or `npm` is not recognized** (Windows): Node.js is not installed, or PowerShell was opened before installing it. Close and reopen PowerShell; if it still fails, reinstall Node.js LTS.
+- **Sign-in says the admin account does not exist / wrong password**: Check that the file is named `.env` and not `.env.txt`, and that it is in the project folder next to `package.json`. The admin is only created once; after that, changing `ADMIN_PASSWORD` in `.env` does not change the existing password.
+- **`EBUSY`, `EPERM` or locked files in `data\portside-db`** (Windows): Another Portside window may still be running, or OneDrive/antivirus is scanning the folder. Close other server windows, or move the project out of a OneDrive-synced folder.
+- **`npm install` fails with network or proxy errors**: Check your internet connection or company proxy, then run it again.
+- **Port 3000 is busy** (`EADDRINUSE`): Another program, or another Portside window, is using it. Stop it, or set another `PORT` in `.env` (for example `PORT=3001`), restart the server and open that port in the browser. On Windows, `netstat -ano | findstr :3000` shows the process ID using the port.
 
 PostgreSQL server only:
 
