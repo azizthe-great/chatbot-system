@@ -14,11 +14,14 @@ if (fs.existsSync(envPath)) {
 module.exports = {
   host: process.env.HOST || '127.0.0.1',
   port: Number(process.env.PORT) || 3000,
-  // DATABASE_URL must be configured in the local .env file or deployment environment.
-  databaseUrl: process.env.DATABASE_URL,
+  // Leave DATABASE_URL unset to use the built-in local database stored in dataDir.
+  databaseUrl: process.env.DATABASE_URL || undefined,
+  dataDir: path.resolve(process.env.PORTSIDE_DATA_DIR || 'data/portside-db'),
   nodeEnv: process.env.NODE_ENV || 'development',
   sessionTtlHours: Math.max(1, Number(process.env.SESSION_TTL_HOURS) || 8),
   cookieSecure: process.env.COOKIE_SECURE === 'true' || (process.env.NODE_ENV || '').toLowerCase() === 'production',
   trustProxy: process.env.TRUST_PROXY === 'true',
-  logLevel: process.env.LOG_LEVEL || 'info'
+  logLevel: process.env.LOG_LEVEL || 'info',
+  // The first administrator, created on start when no account with this email exists.
+  admin: { name: process.env.ADMIN_NAME || 'Administrator', email: process.env.ADMIN_EMAIL || '', password: process.env.ADMIN_PASSWORD || '' }
 };

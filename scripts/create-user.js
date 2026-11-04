@@ -1,7 +1,7 @@
 'use strict';
 const readline = require('node:readline/promises');
 const { stdin, stdout } = require('node:process');
-const { getPool, closePool } = require('../src/database/pool');
+const { openDatabase, closePool } = require('../src/database/pool');
 const { createUser } = require('../src/services/auth');
 
 function secretPrompt(label) {
@@ -34,7 +34,7 @@ function secretPrompt(label) {
     const password = await secretPrompt('Password (hidden; minimum 12 characters): ');
     const confirmation = await secretPrompt('Confirm password: ');
     if (!name || !email || password.length < 12 || password !== confirmation) throw new Error('Name, email and matching password of at least 12 characters are required.');
-    const user = await createUser(getPool(), { name, email, password, role });
+    const user = await createUser(await openDatabase(), { name, email, password, role });
     console.log(`Created ${user.role} account ${user.email} (${user.id}).`);
   } finally { rl.close(); await closePool(); }
 })().catch((error) => { console.error(`Could not create account: ${error.code === '23505' ? 'email already exists.' : error.message}`); process.exitCode = 1; });

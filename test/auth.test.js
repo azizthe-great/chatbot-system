@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { setup } = require('./support/app');
 const { hashToken, createUser } = require('../src/services/auth');
-const { TestDatabase } = require('./support/database');
+const { LocalDatabase } = require('../src/database/local');
 
 test('account auth, roles, ownership, validation, admin updates and session invalidation', async (t) => {
   const { db, request, login, accounts } = await setup(t);
@@ -64,7 +64,7 @@ test('sessions, records, estimates and knowledge remain available after rebuildi
 });
 
 test('duplicate account email is rejected by the database uniqueness constraint', async () => {
-  const db = await TestDatabase.create();
+  const db = await LocalDatabase.create();
   await createUser(db, { name: 'First', email: 'duplicate@example.test', password: 'Long-password-1!', role: 'customer' });
   await assert.rejects(createUser(db, { name: 'Second', email: 'DUPLICATE@example.test', password: 'Long-password-2!', role: 'customer' }), { code: '23505' });
 });
